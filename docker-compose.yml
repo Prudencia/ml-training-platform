@@ -12,6 +12,7 @@ services:
       - ./backend/database:/app/database
     environment:
       - PYTHONUNBUFFERED=1
+    shm_size: '8gb'  # Increase shared memory for PyTorch DataLoader workers
     restart: unless-stopped
     # GPU support - choose ONE option based on your setup:
     #
