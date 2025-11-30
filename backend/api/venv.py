@@ -316,27 +316,62 @@ async def get_preset_venvs(db: Session = Depends(get_db)):
     return result
 
 
-def find_python_executable(version: str = None):
-    """Find Python executable, optionally for a specific version"""
+def find_or_install_python(version: str = None):
+    """Find Python executable, or install it via pyenv if not found"""
     if not version:
         return sys.executable
+
+    import glob
 
     # Try common locations for specific Python versions
     candidates = [
         f"/usr/bin/python{version}",
         f"/usr/local/bin/python{version}",
-        f"/root/.pyenv/versions/{version}.*/bin/python",  # pyenv
+        f"/root/.pyenv/versions/{version}.*/bin/python",
         f"/home/*/.pyenv/versions/{version}.*/bin/python",
     ]
 
-    import glob
     for pattern in candidates:
         matches = glob.glob(pattern)
         if matches:
-            # Return the first valid executable
-            for match in sorted(matches, reverse=True):  # Prefer newer patch versions
+            for match in sorted(matches, reverse=True):
                 if os.path.isfile(match) and os.access(match, os.X_OK):
                     return match
+
+    # Not found - try to install via pyenv
+    pyenv_paths = ["/root/.pyenv/bin/pyenv", "/home/*/.pyenv/bin/pyenv", "/usr/local/bin/pyenv"]
+    pyenv_bin = None
+    for pattern in pyenv_paths:
+        matches = glob.glob(pattern)
+        if matches:
+            pyenv_bin = matches[0]
+            break
+
+    if pyenv_bin:
+        # Find latest patch version for requested major.minor
+        full_version = f"{version}.19" if version == "3.9" else f"{version}.0"
+
+        try:
+            # Install Python via pyenv
+            subprocess.run(
+                [pyenv_bin, "install", "-s", full_version],  # -s = skip if exists
+                check=True,
+                capture_output=True,
+                text=True,
+                timeout=600
+            )
+
+            # Get the installed path
+            pyenv_root = subprocess.run(
+                [pyenv_bin, "root"],
+                capture_output=True, text=True
+            ).stdout.strip()
+
+            installed_python = f"{pyenv_root}/versions/{full_version}/bin/python"
+            if os.path.isfile(installed_python):
+                return installed_python
+        except Exception as e:
+            print(f"Failed to install Python {full_version} via pyenv: {e}")
 
     # Fallback to system python
     return sys.executable
@@ -358,8 +393,8 @@ async def setup_preset_venv(preset_name: str, db: Session = Depends(get_db)):
     venv_path = VENV_PATH / config["name"]
     venv_path.mkdir(parents=True, exist_ok=True)
 
-    # Find appropriate Python executable
-    python_exec = find_python_executable(config.get("python_version"))
+    # Find or install appropriate Python executable
+    python_exec = find_or_install_python(config.get("python_version"))
 
     # Create venv
     try:
