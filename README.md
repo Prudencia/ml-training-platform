@@ -308,33 +308,53 @@ services:
 
 ### GPU Support in Docker
 
-Choose the appropriate option in `docker-compose.yml` based on your setup:
+Choose the appropriate option in `docker-compose.yml` based on your setup. You must uncomment **both** the key and value lines (remove the `#` from both lines).
 
 **Option 1: WSL2 (Windows Subsystem for Linux)**
+
+Edit `docker-compose.yml` and uncomment these lines under the backend service:
 ```yaml
-devices:
-  - nvidia.com/gpu=all
+    devices:
+      - nvidia.com/gpu=all
 ```
 
-Requires CDI mode enabled in Docker. Setup steps:
+Before this works, you need to enable CDI mode in Docker (one-time setup):
 ```bash
+# Install nvidia-container-toolkit if not already installed
+sudo apt-get update
+sudo apt-get install -y nvidia-container-toolkit
+
 # Generate CDI spec
 sudo nvidia-ctk cdi generate --output=/etc/cdi/nvidia.yaml
 
 # Enable CDI in Docker
 echo '{"features":{"cdi":true}}' | sudo tee /etc/docker/daemon.json
 sudo service docker restart
+
+# Verify GPU works in Docker
+docker run --rm --device nvidia.com/gpu=all nvidia/cuda:12.6.0-base-ubuntu24.04 nvidia-smi
 ```
 
 **Option 2: Native Linux**
+
+Edit `docker-compose.yml` and uncomment these lines under the backend service:
 ```yaml
-deploy:
-  resources:
-    reservations:
-      devices:
-        - driver: nvidia
-          count: all
-          capabilities: [gpu]
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+```
+
+**After enabling GPU support:**
+```bash
+docker-compose down
+docker-compose up --build -d
+
+# Verify GPU is accessible inside the container
+docker exec -it ml-training-platform-backend-1 nvidia-smi
 ```
 
 ## Troubleshooting
