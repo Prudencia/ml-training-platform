@@ -118,14 +118,6 @@ function Support() {
         </ul>
       </div>
 
-      {/* Thank You Message */}
-      <div className="text-center py-8">
-        <div className="inline-flex items-center gap-2 text-gray-500">
-          <span>Made with</span>
-          <Heart size={18} className="text-red-500 fill-red-500" />
-          <span>by the community</span>
-        </div>
-      </div>
     </div>
   )
 }

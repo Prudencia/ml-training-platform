@@ -1,13 +1,16 @@
 import React, { useState, useEffect } from 'react'
 import { venvsAPI } from '../services/api'
+import { Zap, Package, CheckCircle } from 'lucide-react'
 
 function VirtualEnvs() {
   const [venvs, setVenvs] = useState([])
+  const [presets, setPresets] = useState([])
   const [showCreateModal, setShowCreateModal] = useState(false)
   const [selectedVenv, setSelectedVenv] = useState(null)
   const [packages, setPackages] = useState([])
   const [newPackage, setNewPackage] = useState('')
   const [isCreating, setIsCreating] = useState(false)
+  const [settingUpPreset, setSettingUpPreset] = useState(null)
   const [newVenv, setNewVenv] = useState({
     name: '',
     description: '',
@@ -16,6 +19,7 @@ function VirtualEnvs() {
 
   useEffect(() => {
     loadVenvs()
+    loadPresets()
   }, [])
 
   const loadVenvs = async () => {
@@ -24,6 +28,30 @@ function VirtualEnvs() {
       setVenvs(res.data)
     } catch (error) {
       console.error('Failed to load venvs:', error)
+    }
+  }
+
+  const loadPresets = async () => {
+    try {
+      const res = await venvsAPI.getPresets()
+      setPresets(res.data)
+    } catch (error) {
+      console.error('Failed to load presets:', error)
+    }
+  }
+
+  const handleSetupPreset = async (presetName) => {
+    setSettingUpPreset(presetName)
+    try {
+      await venvsAPI.setupPreset(presetName)
+      await loadVenvs()
+      await loadPresets()
+      alert(`${presetName} environment created successfully!`)
+    } catch (error) {
+      console.error('Failed to setup preset:', error)
+      alert('Failed to create environment: ' + (error.response?.data?.detail || error.message))
+    } finally {
+      setSettingUpPreset(null)
     }
   }
 
@@ -112,6 +140,9 @@ function VirtualEnvs() {
     }
   }
 
+  // Check if any presets need setup
+  const missingPresets = presets.filter(p => !p.exists)
+
   return (
     <div className="space-y-4 sm:space-y-6">
       <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-4">
@@ -123,6 +154,63 @@ function VirtualEnvs() {
           Create New Venv
         </button>
       </div>
+
+      {/* Quick Setup Section */}
+      {missingPresets.length > 0 && (
+        <div className="bg-gradient-to-r from-purple-50 to-indigo-50 border border-purple-200 rounded-lg p-6">
+          <div className="flex items-center gap-2 mb-4">
+            <Zap className="text-purple-600" size={24} />
+            <h2 className="text-lg font-bold text-purple-800">Quick Setup</h2>
+          </div>
+          <p className="text-sm text-gray-600 mb-4">
+            Set up required environments for the Axis YOLOv5 training and ACAP deployment workflow.
+          </p>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {presets.map((preset) => (
+              <div
+                key={preset.name}
+                className={`p-4 rounded-lg border ${
+                  preset.exists
+                    ? 'bg-green-50 border-green-200'
+                    : 'bg-white border-gray-200'
+                }`}
+              >
+                <div className="flex items-start justify-between">
+                  <div className="flex-1">
+                    <div className="flex items-center gap-2">
+                      <Package size={18} className={preset.exists ? 'text-green-600' : 'text-gray-500'} />
+                      <h3 className="font-semibold text-gray-900">{preset.name}</h3>
+                      {preset.exists && (
+                        <CheckCircle size={16} className="text-green-600" />
+                      )}
+                    </div>
+                    <p className="text-sm text-gray-600 mt-1">{preset.description}</p>
+                  </div>
+                  {!preset.exists && (
+                    <button
+                      onClick={() => handleSetupPreset(preset.name)}
+                      disabled={settingUpPreset !== null}
+                      className="px-4 py-2 bg-purple-600 text-white text-sm rounded-lg hover:bg-purple-700 disabled:opacity-50 disabled:cursor-not-allowed whitespace-nowrap ml-4"
+                    >
+                      {settingUpPreset === preset.name ? (
+                        <span className="flex items-center gap-2">
+                          <svg className="animate-spin h-4 w-4" viewBox="0 0 24 24">
+                            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
+                            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                          </svg>
+                          Setting up...
+                        </span>
+                      ) : (
+                        'Setup'
+                      )}
+                    </button>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* Venvs Grid */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">

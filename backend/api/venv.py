@@ -279,3 +279,121 @@ async def apply_axis_patch_endpoint(venv_id: int, db: Session = Depends(get_db))
         "venv_name": venv.name,
         **result
     }
+
+
+# Preset configurations for special venvs
+PRESET_VENVS = {
+    "axis_yolov5": {
+        "name": "axis_yolov5",
+        "description": "YOLOv5 for Axis camera deployment (with ReLU6 patch)",
+        "github_repo": "https://github.com/ultralytics/yolov5",
+        "apply_axis_patch": True
+    },
+    "DetectX": {
+        "name": "DetectX",
+        "description": "DetectX ACAP builder for Axis cameras",
+        "github_repo": "https://github.com/pandosme/DetectX.git",
+        "apply_axis_patch": False
+    }
+}
+
+
+@router.get("/presets/available")
+async def get_preset_venvs(db: Session = Depends(get_db)):
+    """Get list of available preset venvs and their status"""
+    result = []
+    for preset_name, config in PRESET_VENVS.items():
+        existing = db.query(VirtualEnvironment).filter(VirtualEnvironment.name == preset_name).first()
+        result.append({
+            "name": preset_name,
+            "description": config["description"],
+            "exists": existing is not None,
+            "venv_id": existing.id if existing else None
+        })
+    return result
+
+
+@router.post("/presets/setup/{preset_name}")
+async def setup_preset_venv(preset_name: str, db: Session = Depends(get_db)):
+    """Create a preset virtual environment with predefined configuration"""
+    if preset_name not in PRESET_VENVS:
+        raise HTTPException(status_code=404, detail=f"Unknown preset: {preset_name}. Available: {list(PRESET_VENVS.keys())}")
+
+    config = PRESET_VENVS[preset_name]
+
+    # Check if already exists
+    existing = db.query(VirtualEnvironment).filter(VirtualEnvironment.name == config["name"]).first()
+    if existing:
+        raise HTTPException(status_code=400, detail=f"Virtual environment '{config['name']}' already exists")
+
+    venv_path = VENV_PATH / config["name"]
+    venv_path.mkdir(parents=True, exist_ok=True)
+
+    # Create venv
+    try:
+        subprocess.run(
+            [sys.executable, "-m", "venv", str(venv_path)],
+            check=True,
+            capture_output=True,
+            text=True
+        )
+    except subprocess.CalledProcessError as e:
+        raise HTTPException(status_code=500, detail=f"Failed to create venv: {e.stderr}")
+
+    # Get Python version
+    python_bin = venv_path / "bin" / "python" if os.name != 'nt' else venv_path / "Scripts" / "python.exe"
+    result = subprocess.run([str(python_bin), "--version"], capture_output=True, text=True)
+    python_version = result.stdout.strip() or result.stderr.strip()
+
+    # Clone GitHub repo
+    if config.get("github_repo"):
+        repo_path = venv_path / "repo"
+        try:
+            subprocess.run(
+                ["git", "clone", config["github_repo"], str(repo_path)],
+                check=True,
+                capture_output=True,
+                text=True
+            )
+
+            # Install requirements if they exist
+            requirements_file = repo_path / "requirements.txt"
+            if requirements_file.exists():
+                subprocess.run(
+                    [str(python_bin), "-m", "pip", "install", "-r", str(requirements_file)],
+                    check=True,
+                    capture_output=True,
+                    text=True,
+                    timeout=600  # 10 min timeout for large installs
+                )
+        except subprocess.CalledProcessError as e:
+            import shutil
+            shutil.rmtree(venv_path)
+            raise HTTPException(status_code=500, detail=f"Failed to clone/install from GitHub: {e.stderr}")
+        except subprocess.TimeoutExpired:
+            import shutil
+            shutil.rmtree(venv_path)
+            raise HTTPException(status_code=500, detail="Installation timed out (>10 min)")
+
+    # Create database entry
+    new_venv = VirtualEnvironment(
+        name=config["name"],
+        path=str(venv_path),
+        python_version=python_version,
+        github_repo=config.get("github_repo"),
+        description=config["description"]
+    )
+    db.add(new_venv)
+    db.commit()
+    db.refresh(new_venv)
+
+    # Apply Axis patch if needed
+    patch_result = None
+    if config.get("apply_axis_patch"):
+        patch_result = apply_axis_patch(str(venv_path))
+
+    return {
+        "message": f"Preset '{preset_name}' created successfully",
+        "venv_id": new_venv.id,
+        "patch_applied": patch_result
+    }

@@ -41,6 +41,9 @@ export const venvsAPI = {
   getRequirements: (id) => api.get(`/api/venv/${id}/requirements`),
   toggleActive: (id) => api.patch(`/api/venv/${id}/toggle`),
   delete: (id) => api.delete(`/api/venv/${id}`),
+  // Preset venvs
+  getPresets: () => api.get('/api/venv/presets/available'),
+  setupPreset: (presetName) => api.post(`/api/venv/presets/setup/${presetName}`, null, { timeout: 600000 }),
 }
 
 // Training API
