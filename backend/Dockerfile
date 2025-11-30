@@ -3,7 +3,7 @@ FROM python:3.11-slim
 
 WORKDIR /app
 
-# Install system dependencies (libgl1 replaces libgl1-mesa-glx in newer Debian)
+# Install system dependencies and pyenv prerequisites
 RUN apt-get update && apt-get install -y \
     git \
     libgl1 \
@@ -11,7 +11,28 @@ RUN apt-get update && apt-get install -y \
     libsm6 \
     libxext6 \
     libxrender-dev \
+    curl \
+    build-essential \
+    libssl-dev \
+    zlib1g-dev \
+    libbz2-dev \
+    libreadline-dev \
+    libsqlite3-dev \
+    libncursesw5-dev \
+    xz-utils \
+    tk-dev \
+    libxml2-dev \
+    libxmlsec1-dev \
+    libffi-dev \
+    liblzma-dev \
     && rm -rf /var/lib/apt/lists/*
+
+# Install pyenv and Python 3.9.19 for axis_yolov5 compatibility
+ENV PYENV_ROOT=/root/.pyenv
+ENV PATH=$PYENV_ROOT/bin:$PYENV_ROOT/shims:$PATH
+RUN curl https://pyenv.run | bash && \
+    pyenv install 3.9.19 && \
+    pyenv global 3.11
 
 # Copy requirements and install dependencies
 COPY requirements.txt .
