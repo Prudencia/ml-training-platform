@@ -287,13 +287,16 @@ PRESET_VENVS = {
         "name": "axis_yolov5",
         "description": "YOLOv5 for Axis camera deployment (with ReLU6 patch)",
         "github_repo": "https://github.com/ultralytics/yolov5",
-        "apply_axis_patch": True
+        "apply_axis_patch": True,
+        "python_version": "3.9",  # TensorFlow 2.11 requires Python 3.9
+        "custom_requirements": "presets/axis_yolov5_requirements.txt"
     },
     "DetectX": {
         "name": "DetectX",
         "description": "DetectX ACAP builder for Axis cameras",
         "github_repo": "https://github.com/pandosme/DetectX.git",
-        "apply_axis_patch": False
+        "apply_axis_patch": False,
+        "custom_requirements": "presets/detectx_requirements.txt"
     }
 }
 
@@ -313,6 +316,32 @@ async def get_preset_venvs(db: Session = Depends(get_db)):
     return result
 
 
+def find_python_executable(version: str = None):
+    """Find Python executable, optionally for a specific version"""
+    if not version:
+        return sys.executable
+
+    # Try common locations for specific Python versions
+    candidates = [
+        f"/usr/bin/python{version}",
+        f"/usr/local/bin/python{version}",
+        f"/root/.pyenv/versions/{version}.*/bin/python",  # pyenv
+        f"/home/*/.pyenv/versions/{version}.*/bin/python",
+    ]
+
+    import glob
+    for pattern in candidates:
+        matches = glob.glob(pattern)
+        if matches:
+            # Return the first valid executable
+            for match in sorted(matches, reverse=True):  # Prefer newer patch versions
+                if os.path.isfile(match) and os.access(match, os.X_OK):
+                    return match
+
+    # Fallback to system python
+    return sys.executable
+
+
 @router.post("/presets/setup/{preset_name}")
 async def setup_preset_venv(preset_name: str, db: Session = Depends(get_db)):
     """Create a preset virtual environment with predefined configuration"""
@@ -329,21 +358,30 @@ async def setup_preset_venv(preset_name: str, db: Session = Depends(get_db)):
     venv_path = VENV_PATH / config["name"]
     venv_path.mkdir(parents=True, exist_ok=True)
 
+    # Find appropriate Python executable
+    python_exec = find_python_executable(config.get("python_version"))
+
     # Create venv
     try:
         subprocess.run(
-            [sys.executable, "-m", "venv", str(venv_path)],
+            [python_exec, "-m", "venv", str(venv_path)],
             check=True,
             capture_output=True,
             text=True
         )
     except subprocess.CalledProcessError as e:
-        raise HTTPException(status_code=500, detail=f"Failed to create venv: {e.stderr}")
+        raise HTTPException(status_code=500, detail=f"Failed to create venv with {python_exec}: {e.stderr}")
 
     # Get Python version
     python_bin = venv_path / "bin" / "python" if os.name != 'nt' else venv_path / "Scripts" / "python.exe"
     result = subprocess.run([str(python_bin), "--version"], capture_output=True, text=True)
     python_version = result.stdout.strip() or result.stderr.strip()
+
+    # Upgrade pip first
+    subprocess.run(
+        [str(python_bin), "-m", "pip", "install", "--upgrade", "pip"],
+        capture_output=True, text=True
+    )
 
     # Clone GitHub repo
     if config.get("github_repo"):
@@ -355,25 +393,32 @@ async def setup_preset_venv(preset_name: str, db: Session = Depends(get_db)):
                 capture_output=True,
                 text=True
             )
-
-            # Install requirements if they exist
-            requirements_file = repo_path / "requirements.txt"
-            if requirements_file.exists():
-                subprocess.run(
-                    [str(python_bin), "-m", "pip", "install", "-r", str(requirements_file)],
-                    check=True,
-                    capture_output=True,
-                    text=True,
-                    timeout=600  # 10 min timeout for large installs
-                )
         except subprocess.CalledProcessError as e:
             import shutil
             shutil.rmtree(venv_path)
-            raise HTTPException(status_code=500, detail=f"Failed to clone/install from GitHub: {e.stderr}")
-        except subprocess.TimeoutExpired:
-            import shutil
-            shutil.rmtree(venv_path)
-            raise HTTPException(status_code=500, detail="Installation timed out (>10 min)")
+            raise HTTPException(status_code=500, detail=f"Failed to clone from GitHub: {e.stderr}")
+
+    # Install custom requirements if specified (takes priority over repo requirements)
+    custom_req = config.get("custom_requirements")
+    if custom_req:
+        custom_req_path = Path(custom_req)
+        if custom_req_path.exists():
+            try:
+                subprocess.run(
+                    [str(python_bin), "-m", "pip", "install", "-r", str(custom_req_path)],
+                    check=True,
+                    capture_output=True,
+                    text=True,
+                    timeout=900  # 15 min timeout for large installs
+                )
+            except subprocess.CalledProcessError as e:
+                import shutil
+                shutil.rmtree(venv_path)
+                raise HTTPException(status_code=500, detail=f"Failed to install requirements: {e.stderr}")
+            except subprocess.TimeoutExpired:
+                import shutil
+                shutil.rmtree(venv_path)
+                raise HTTPException(status_code=500, detail="Installation timed out (>15 min)")
 
     # Create database entry
     new_venv = VirtualEnvironment(
@@ -395,5 +440,6 @@ async def setup_preset_venv(preset_name: str, db: Session = Depends(get_db)):
     return {
         "message": f"Preset '{preset_name}' created successfully",
         "venv_id": new_venv.id,
+        "python_used": python_exec,
         "patch_applied": patch_result
     }

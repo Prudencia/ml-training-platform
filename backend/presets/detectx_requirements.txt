@@ -1,0 +1,4 @@
+# DetectX ACAP builder requirements
+tensorflow>=2.4.0
+numpy
+pillow
