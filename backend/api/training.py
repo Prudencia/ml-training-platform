@@ -152,13 +152,16 @@ async def start_training(training_data: TrainingCreate, db: Session = Depends(ge
     is_training_from_scratch = not training_data.weights or training_data.weights == ""
     is_using_pretrained = training_data.weights and training_data.weights.endswith('.pt') and not training_data.weights.startswith('/')
 
-    # BLOCK training from scratch if Axis patch is not applied
+    # Auto-apply Axis patch if training from scratch and not applied
     if is_training_from_scratch and not patch_status["is_applied"]:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Cannot train from scratch without Axis patch. {patch_status['message']}. "
-                   f"Apply the patch first via /api/venvs/{venv.id}/axis-patch (POST)"
-        )
+        from api.utils.axis_patch import apply_axis_patch
+        patch_result = apply_axis_patch(venv.path)
+        if not patch_result["success"]:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Cannot train from scratch without Axis patch. Auto-apply failed: {patch_result['message']}. "
+                       f"Try manually via /api/venv/{venv.id}/axis-patch (POST)"
+            )
 
     # WARN/BLOCK when using pre-trained weights (like yolov5m.pt) - these have wrong architecture!
     if is_using_pretrained and not training_data.cfg:
