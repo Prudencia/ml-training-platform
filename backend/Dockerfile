@@ -30,9 +30,8 @@ RUN apt-get update && apt-get install -y \
 # Install pyenv and Python 3.9.19 for axis_yolov5 compatibility
 ENV PYENV_ROOT=/root/.pyenv
 ENV PATH=$PYENV_ROOT/bin:$PYENV_ROOT/shims:$PATH
-RUN curl https://pyenv.run | bash && \
-    pyenv install 3.9.19 && \
-    pyenv global 3.11
+RUN curl https://pyenv.run | bash
+RUN eval "$(pyenv init -)" && pyenv install 3.9.19
 
 # Copy requirements and install dependencies
 COPY requirements.txt .
