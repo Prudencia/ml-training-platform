@@ -333,7 +333,17 @@ If you find this project useful, consider supporting its development:
 
 ## License
 
-MIT License - feel free to use and modify.
+**PolyForm Noncommercial License 1.0.0**
+
+This software is free to use for:
+- Personal projects and learning
+- Research and education
+- Non-profit organizations
+- Hobby and amateur use
+
+**Commercial use requires a separate license.** If you want to use this software for commercial purposes (selling products/services, internal business tools, etc.), please contact the author.
+
+See the [LICENSE](LICENSE) file for the full legal text.
 
 ## Contributing
 
