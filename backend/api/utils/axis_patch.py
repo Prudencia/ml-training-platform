@@ -124,6 +124,10 @@ def apply_axis_patch(venv_path: str) -> Dict:
     """
     Apply the Axis patch to the YOLOv5 repository.
 
+    The patch modifies:
+    1. First conv layer from [64, 6, 2, 2] to [64, 5, 2, 1] (6x6 -> 5x5 kernel)
+    2. Adds activation: nn.ReLU6() to each model YAML
+
     Args:
         venv_path: Path to the virtual environment containing the YOLOv5 repo
 
@@ -134,11 +138,19 @@ def apply_axis_patch(venv_path: str) -> Dict:
         - verification: dict - Post-apply verification result
     """
     repo_path = Path(venv_path) / "repo"
+    models_path = repo_path / "models"
 
     if not repo_path.exists():
         return {
             "success": False,
             "message": f"Repository not found: {repo_path}",
+            "verification": None
+        }
+
+    if not models_path.exists():
+        return {
+            "success": False,
+            "message": f"Models directory not found: {models_path}",
             "verification": None
         }
 
@@ -152,51 +164,63 @@ def apply_axis_patch(venv_path: str) -> Dict:
         }
 
     try:
-        # Download and apply patch
-        cmd = f"curl -sL {AXIS_PATCH_URL} | git apply"
-        result = subprocess.run(
-            cmd,
-            shell=True,
-            cwd=str(repo_path),
-            capture_output=True,
-            text=True,
-            timeout=30
-        )
+        # Apply patch directly by modifying YAML files
+        yaml_files = ["yolov5s.yaml", "yolov5m.yaml", "yolov5l.yaml", "yolov5x.yaml", "yolov5n.yaml"]
+        files_modified = 0
 
-        if result.returncode != 0:
-            # Try with --3way for conflicts
-            cmd_3way = f"curl -sL {AXIS_PATCH_URL} | git apply --3way"
-            result = subprocess.run(
-                cmd_3way,
-                shell=True,
-                cwd=str(repo_path),
-                capture_output=True,
-                text=True,
-                timeout=30
-            )
+        for yaml_file in yaml_files:
+            yaml_path = models_path / yaml_file
+            if yaml_path.exists():
+                with open(yaml_path, 'r') as f:
+                    content = f.read()
 
-            if result.returncode != 0:
-                return {
-                    "success": False,
-                    "message": f"Failed to apply patch: {result.stderr}",
-                    "verification": None
-                }
+                original_content = content
+                modified = False
+
+                # Add activation: nn.ReLU6() after anchors section if not present
+                if "activation:" not in content:
+                    # Find the anchors section and add activation after it
+                    # Pattern: after "anchors:" block and before "# YOLOv5" backbone comment
+                    if "anchors:" in content and "backbone:" in content:
+                        # Insert activation line before backbone
+                        content = content.replace(
+                            "# YOLOv5 v6.0 backbone",
+                            "activation: nn.ReLU6()  # Axis DLPU compatible\n\n# YOLOv5 v6.0 backbone"
+                        )
+                        # Also try without version number
+                        if "activation:" not in content:
+                            content = content.replace(
+                                "backbone:",
+                                "activation: nn.ReLU6()  # Axis DLPU compatible\n\nbackbone:"
+                            )
+                        modified = True
+
+                # Change first conv from 6x6 to 5x5: [64, 6, 2, 2] -> [64, 5, 2, 1]
+                if "[64, 6, 2, 2]" in content:
+                    content = content.replace("[64, 6, 2, 2]", "[64, 5, 2, 1]")
+                    modified = True
+
+                if modified and content != original_content:
+                    with open(yaml_path, 'w') as f:
+                        f.write(content)
+                    files_modified += 1
+
+        if files_modified == 0:
+            return {
+                "success": False,
+                "message": "No files were modified - patch may already be applied or files don't match expected format",
+                "verification": verify_axis_patch(venv_path)
+            }
 
         # Verify after applying
         verification = verify_axis_patch(venv_path)
 
         return {
             "success": verification["is_applied"],
-            "message": "Axis patch applied successfully" if verification["is_applied"] else "Patch applied but verification failed",
+            "message": f"Axis patch applied to {files_modified} files" if verification["is_applied"] else f"Modified {files_modified} files but verification failed",
             "verification": verification
         }
 
-    except subprocess.TimeoutExpired:
-        return {
-            "success": False,
-            "message": "Patch application timed out",
-            "verification": None
-        }
     except Exception as e:
         return {
             "success": False,
