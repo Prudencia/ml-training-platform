@@ -28,6 +28,7 @@ A comprehensive web-based platform for managing machine learning training workfl
 
 ### Training & Virtual Environments
 - **Virtual Environment Management**: Create isolated Python environments, clone GitHub repos, manage dependencies
+- **Quick Setup**: One-click setup for axis_yolov5 and DetectX environments with correct Python versions and dependencies
 - **Training Job Control**: Start, stop, pause, resume training with real-time progress and live log streaming
 - **Training Presets**: Save and reuse configurations (Small/Medium/Large defaults included)
 - **Training Queue**: Queue multiple jobs with priority-based execution and scheduling
@@ -42,12 +43,6 @@ A comprehensive web-based platform for managing machine learning training workfl
 - **System Dashboard**: Real-time CPU, GPU, memory, and disk usage monitoring
 - **Web Terminal**: Interactive browser-based terminal with full PTY support
 - **Support Page**: Donation and contribution links
-
-## Screenshots
-
-| Dashboard | Annotation Tool | Training Jobs |
-|-----------|-----------------|---------------|
-| System monitoring with GPU stats | Draw bounding boxes with class labels | Real-time training progress |
 
 ## Tech Stack
 
@@ -70,17 +65,21 @@ A comprehensive web-based platform for managing machine learning training workfl
 ## Project Structure
 
 ```
-trainplattform/
+ml-training-platform/
 ├── backend/
 │   ├── main.py                 # FastAPI application entry point
 │   ├── database.py             # SQLAlchemy models
 │   ├── requirements.txt        # Python dependencies
+│   ├── Dockerfile              # Backend container (includes pyenv + Python 3.9)
+│   ├── presets/                # Venv preset configurations
+│   │   ├── axis_yolov5_requirements.txt  # TensorFlow 2.11, Python 3.9
+│   │   └── detectx_requirements.txt      # TensorFlow 2.20, Python 3.11+
 │   └── api/
 │       ├── annotations.py      # Annotation projects, images, labels
 │       ├── autolabel.py        # Auto-labeling with pretrained models
 │       ├── datasets.py         # Dataset upload, browse, preview
 │       ├── training.py         # Training job control
-│       ├── venv.py             # Virtual environment management
+│       ├── venv.py             # Virtual environment management + presets
 │       ├── presets.py          # Training presets
 │       ├── workflows.py        # Axis YOLOv5, export, DetectX
 │       ├── settings.py         # User auth, system settings
@@ -98,7 +97,7 @@ trainplattform/
 │   │       ├── AnnotateProject.jsx # Annotation editor
 │   │       ├── Datasets.jsx        # Dataset management
 │   │       ├── TrainingJobs.jsx    # Training control
-│   │       ├── VirtualEnvs.jsx     # Environment management
+│   │       ├── VirtualEnvs.jsx     # Environment management + Quick Setup
 │   │       ├── Presets.jsx         # Training presets
 │   │       ├── Queue.jsx           # Training queue
 │   │       ├── Exports.jsx         # Model exports
@@ -108,6 +107,7 @@ trainplattform/
 │   │       └── Support.jsx         # Donation page
 │   └── dist/                   # Production build (generated)
 │
+├── docker-compose.yml          # Docker orchestration
 └── backend/storage/            # Data storage (auto-created)
     ├── datasets/               # Uploaded datasets
     ├── models/                 # Trained models
@@ -123,42 +123,97 @@ trainplattform/
 ## Quick Start
 
 ### Prerequisites
-- Python 3.9+
-- Node.js 16+
+- Python 3.11+ (for main app)
+- Node.js 18+
 - Git
 - (Optional) NVIDIA GPU with CUDA
-- (Optional) Docker for DetectX builds
+- (Optional) Docker for containerized deployment
 
-### 1. Clone and Setup
+### Option 1: Docker (Recommended)
+
+The easiest way to get started:
 
 ```bash
 git clone https://github.com/Prudencia/ml-training-platform.git
 cd ml-training-platform
-chmod +x setup.sh && ./setup.sh
+docker-compose up --build -d
 ```
 
-### 2. Start Backend
+Access:
+- **Frontend**: `http://localhost:3080`
+- **Backend API**: `http://localhost:8081`
+- **API Docs**: `http://localhost:8081/docs`
 
+The Docker image includes pyenv with Python 3.9.19 pre-installed for axis_yolov5 compatibility.
+
+### Option 2: Manual Setup
+
+```bash
+# Clone repository
+git clone https://github.com/Prudencia/ml-training-platform.git
+cd ml-training-platform
+
+# Setup backend
+cd backend
+python -m venv venv
+source venv/bin/activate
+pip install -r requirements.txt
+
+# Setup frontend
+cd ../frontend
+npm install
+npm run build
+
+# Start backend (serves both API and built frontend)
+cd ../backend
+source venv/bin/activate
+uvicorn main:app --host 0.0.0.0 --port 8000
+```
+
+Access everything at `http://localhost:8000`.
+
+### Option 3: Development Mode
+
+Run frontend and backend separately for development:
+
+**Backend:**
 ```bash
 cd backend
 source venv/bin/activate
-python main.py
-# or: uvicorn main:app --host 0.0.0.0 --port 8000
+uvicorn main:app --host 0.0.0.0 --port 8000 --reload
 ```
 
-### 3. Start Frontend (Development)
-
+**Frontend:**
 ```bash
 cd frontend
-npm install
 npm run dev
 ```
 
-### 4. Access
+Access:
+- **Frontend**: `http://localhost:3000`
+- **Backend API**: `http://localhost:8000`
 
-- Frontend: `http://localhost:3000`
-- Backend API: `http://localhost:8000`
-- API Docs: `http://localhost:8000/docs`
+## Virtual Environment Setup
+
+The platform requires two specialized virtual environments for the Axis workflow:
+
+### axis_yolov5
+- **Purpose**: YOLOv5 training with Axis-optimized export (ReLU6 activation)
+- **Python**: 3.9.19 (required for TensorFlow 2.11)
+- **Key packages**: TensorFlow 2.11.1, Keras 2.11.0, PyTorch, NumPy <2.0
+
+### DetectX
+- **Purpose**: Building ACAP packages (.eap) for Axis cameras
+- **Python**: 3.11+ (system default)
+- **Key packages**: TensorFlow 2.20.0, Keras 3.12.0
+
+**Quick Setup**: Go to Virtual Environments page and click "Setup" for each preset. The platform will:
+1. Install the required Python version via pyenv (if needed)
+2. Create the virtual environment
+3. Install all dependencies
+4. Apply necessary patches (for axis_yolov5)
+
+**Note**: For axis_yolov5, pyenv must be installed on the system. The Docker image has this pre-configured.
 
 ## Workflows
 
@@ -172,7 +227,7 @@ npm run dev
    Boxes
 4. Generate Splits   → Train/Val/Test split assignment
 5. Export Dataset    → Creates YOLO-format dataset
-6. Create Venv       → /venvs (clone YOLOv5 repo)
+6. Setup Venv        → /venvs (use Quick Setup for axis_yolov5)
 7. Start Training    → /training (configure and run)
 8. Monitor Progress  → Real-time logs and metrics
 9. Export Model      → /exports (TFLite with INT8)
@@ -211,7 +266,7 @@ npm run dev
 | `/api/annotations/` | Annotation projects, images, labels, class management |
 | `/api/autolabel/` | Auto-labeling jobs, predictions, model management |
 | `/api/training/` | Training job control, logs |
-| `/api/venv/` | Virtual environment management |
+| `/api/venv/` | Virtual environment management, presets |
 | `/api/presets/` | Training presets |
 | `/api/workflows/` | Axis YOLOv5, export, DetectX |
 | `/api/system/` | System monitoring |
@@ -232,77 +287,37 @@ npm run dev
 - GPU: NVIDIA 8GB+ VRAM
 - Disk: 100GB+ SSD
 
-## Deployment Options
+## Docker Configuration
 
-### Option 1: Docker (Recommended)
+Default ports (can be changed in `docker-compose.yml`):
+- **Frontend**: 3080
+- **Backend**: 8081
 
-The easiest way to deploy the platform:
-
-```bash
-# Build and start all services
-docker-compose up --build -d
-
-# View logs
-docker-compose logs -f
-
-# Stop services
-docker-compose down
+To use different ports, edit `docker-compose.yml`:
+```yaml
+services:
+  backend:
+    ports:
+      - "YOUR_PORT:8000"
+  frontend:
+    args:
+      - VITE_API_URL=http://localhost:YOUR_PORT
+    ports:
+      - "YOUR_FRONTEND_PORT:80"
 ```
 
-Access at `http://localhost:3000` (frontend) and `http://localhost:8000` (API).
+### GPU Support in Docker
 
-### Option 2: Production (Single Server)
-
-Build the frontend and serve everything from the backend:
-
-```bash
-# Build frontend
-cd frontend
-npm run build
-cd ..
-
-# Start backend (serves both API and frontend)
-cd backend
-source venv/bin/activate
-gunicorn main:app --workers 4 --worker-class uvicorn.workers.UvicornWorker --bind 0.0.0.0:8000
+Uncomment the GPU section in `docker-compose.yml`:
+```yaml
+deploy:
+  resources:
+    reservations:
+      devices:
+        - driver: nvidia
+          count: all
+          capabilities: [gpu]
 ```
-
-Access everything at `http://localhost:8000`.
-
-### Option 3: Separate Services
-
-Run backend and frontend separately:
-
-**Backend:**
-```bash
-cd backend
-source venv/bin/activate
-gunicorn main:app --workers 4 --worker-class uvicorn.workers.UvicornWorker --bind 0.0.0.0:8000
-```
-
-**Frontend:**
-```bash
-cd frontend
-npm run build
-# Serve with nginx, Apache, or any static file server
-```
-
-### Remote Access Configuration
-
-To access the platform from another machine:
-
-1. Edit `frontend/.env`:
-   ```
-   VITE_API_URL=http://YOUR_SERVER_IP:8000
-   ```
-
-2. Rebuild the frontend:
-   ```bash
-   cd frontend && npm run build
-   ```
-
-3. Ensure firewall allows ports 3000 and 8000
-
 
 ## Troubleshooting
 
@@ -322,6 +337,15 @@ nvidia-smi  # Verify drivers
 **Export failing:**
 - Ensure model weights file exists
 - Check disk space for TFLite export
+
+**axis_yolov5 setup failing:**
+- Ensure pyenv is installed
+- Check Python 3.9.19 build dependencies are installed
+- Docker image has this pre-configured
+
+**Port conflicts:**
+- Docker uses ports 3080/8081 to avoid conflicts with common services
+- Change ports in `docker-compose.yml` if needed
 
 ## Support
 
