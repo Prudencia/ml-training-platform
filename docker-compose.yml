@@ -13,7 +13,13 @@ services:
     environment:
       - PYTHONUNBUFFERED=1
     restart: unless-stopped
-    # GPU support (uncomment if using NVIDIA GPU)
+    # GPU support - choose ONE option based on your setup:
+    #
+    # Option 1: WSL2 with CDI mode (recommended for WSL2)
+    # devices:
+    #   - nvidia.com/gpu=all
+    #
+    # Option 2: Native Linux with legacy mode
     # deploy:
     #   resources:
     #     reservations:

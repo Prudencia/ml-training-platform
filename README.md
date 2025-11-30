@@ -308,7 +308,25 @@ services:
 
 ### GPU Support in Docker
 
-Uncomment the GPU section in `docker-compose.yml`:
+Choose the appropriate option in `docker-compose.yml` based on your setup:
+
+**Option 1: WSL2 (Windows Subsystem for Linux)**
+```yaml
+devices:
+  - nvidia.com/gpu=all
+```
+
+Requires CDI mode enabled in Docker. Setup steps:
+```bash
+# Generate CDI spec
+sudo nvidia-ctk cdi generate --output=/etc/cdi/nvidia.yaml
+
+# Enable CDI in Docker
+echo '{"features":{"cdi":true}}' | sudo tee /etc/docker/daemon.json
+sudo service docker restart
+```
+
+**Option 2: Native Linux**
 ```yaml
 deploy:
   resources:
