@@ -316,29 +316,13 @@ async def get_preset_venvs(db: Session = Depends(get_db)):
     return result
 
 
-def find_or_install_python(version: str = None):
-    """Find Python executable, or install it via pyenv if not found"""
-    if not version:
-        return sys.executable
-
+def install_python_for_venv(version: str, venv_path: Path):
+    """Install specific Python version into venv using pyenv"""
     import glob
 
-    # Try common locations for specific Python versions
-    candidates = [
-        f"/usr/bin/python{version}",
-        f"/usr/local/bin/python{version}",
-        f"/root/.pyenv/versions/{version}.*/bin/python",
-        f"/home/*/.pyenv/versions/{version}.*/bin/python",
-    ]
+    full_version = f"{version}.19" if version == "3.9" else f"{version}.0"
 
-    for pattern in candidates:
-        matches = glob.glob(pattern)
-        if matches:
-            for match in sorted(matches, reverse=True):
-                if os.path.isfile(match) and os.access(match, os.X_OK):
-                    return match
-
-    # Not found - try to install via pyenv
+    # Find pyenv
     pyenv_paths = ["/root/.pyenv/bin/pyenv", "/home/*/.pyenv/bin/pyenv", "/usr/local/bin/pyenv"]
     pyenv_bin = None
     for pattern in pyenv_paths:
@@ -347,34 +331,31 @@ def find_or_install_python(version: str = None):
             pyenv_bin = matches[0]
             break
 
-    if pyenv_bin:
-        # Find latest patch version for requested major.minor
-        full_version = f"{version}.19" if version == "3.9" else f"{version}.0"
+    if not pyenv_bin:
+        raise Exception("pyenv not found. Please install pyenv first.")
 
-        try:
-            # Install Python via pyenv
-            subprocess.run(
-                [pyenv_bin, "install", "-s", full_version],  # -s = skip if exists
-                check=True,
-                capture_output=True,
-                text=True,
-                timeout=600
-            )
+    # Get pyenv root
+    pyenv_root = subprocess.run(
+        [pyenv_bin, "root"],
+        capture_output=True, text=True
+    ).stdout.strip()
 
-            # Get the installed path
-            pyenv_root = subprocess.run(
-                [pyenv_bin, "root"],
-                capture_output=True, text=True
-            ).stdout.strip()
+    # Check if version already installed in pyenv
+    installed_python = f"{pyenv_root}/versions/{full_version}/bin/python"
+    if not os.path.isfile(installed_python):
+        # Install Python via pyenv
+        subprocess.run(
+            [pyenv_bin, "install", "-s", full_version],
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=600
+        )
 
-            installed_python = f"{pyenv_root}/versions/{full_version}/bin/python"
-            if os.path.isfile(installed_python):
-                return installed_python
-        except Exception as e:
-            print(f"Failed to install Python {full_version} via pyenv: {e}")
+    if not os.path.isfile(installed_python):
+        raise Exception(f"Failed to install Python {full_version}")
 
-    # Fallback to system python
-    return sys.executable
+    return installed_python
 
 
 @router.post("/presets/setup/{preset_name}")
@@ -393,8 +374,18 @@ async def setup_preset_venv(preset_name: str, db: Session = Depends(get_db)):
     venv_path = VENV_PATH / config["name"]
     venv_path.mkdir(parents=True, exist_ok=True)
 
-    # Find or install appropriate Python executable
-    python_exec = find_or_install_python(config.get("python_version"))
+    # Get Python executable - install specific version if required
+    required_python = config.get("python_version")
+    if required_python:
+        try:
+            python_exec = install_python_for_venv(required_python, venv_path)
+        except Exception as e:
+            import shutil
+            if venv_path.exists():
+                shutil.rmtree(venv_path)
+            raise HTTPException(status_code=500, detail=f"Failed to install Python {required_python}: {str(e)}")
+    else:
+        python_exec = sys.executable
 
     # Create venv
     try:
@@ -405,6 +396,9 @@ async def setup_preset_venv(preset_name: str, db: Session = Depends(get_db)):
             text=True
         )
     except subprocess.CalledProcessError as e:
+        import shutil
+        if venv_path.exists():
+            shutil.rmtree(venv_path)
         raise HTTPException(status_code=500, detail=f"Failed to create venv with {python_exec}: {e.stderr}")
 
     # Get Python version
