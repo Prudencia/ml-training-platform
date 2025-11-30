@@ -6,7 +6,7 @@ services:
       context: ./backend
       dockerfile: Dockerfile
     ports:
-      - "8001:8000"
+      - "8081:8000"
     volumes:
       - ./backend/storage:/app/storage
       - ./backend/database:/app/database
@@ -27,9 +27,9 @@ services:
       context: ./frontend
       dockerfile: Dockerfile
       args:
-        - VITE_API_URL=http://localhost:8001
+        - VITE_API_URL=http://localhost:8081
     ports:
-      - "3000:80"
+      - "3080:80"
     depends_on:
       - backend
     restart: unless-stopped
