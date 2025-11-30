@@ -26,7 +26,7 @@ function Support() {
       icon: Star,
       color: 'bg-yellow-500',
       hoverColor: 'hover:bg-yellow-600',
-      url: 'https://github.com/Prudencia/trainplattform'
+      url: 'https://github.com/Prudencia/ml-training-platform'
     },
     {
       name: 'Contribute',
@@ -34,7 +34,7 @@ function Support() {
       icon: Github,
       color: 'bg-gray-700',
       hoverColor: 'hover:bg-gray-800',
-      url: 'https://github.com/Prudencia/trainplattform'
+      url: 'https://github.com/Prudencia/ml-training-platform'
     }
   ]
 
