@@ -1,0 +1,92 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+env/
+ENV/
+*.egg-info/
+build/
+
+# Node
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+.vite/
+
+# Frontend build (rebuild with npm run build)
+frontend/dist/
+
+# Database (contains local data)
+*.db
+*.sqlite
+*.sqlite3
+backend/database/
+
+# Backend storage (datasets, annotations, models, venvs)
+backend/storage/datasets/*
+backend/storage/models/*
+backend/storage/venvs/*
+backend/storage/logs/*
+backend/storage/configs/*
+backend/storage/annotations/*
+backend/storage/exports/*
+backend/storage/pretrained_models/*
+backend/storage/detectx_builds/*
+backend/storage/annotation_projects/*
+backend/storage/inference/*
+
+# Keep directory structure with .gitkeep
+!backend/storage/datasets/.gitkeep
+!backend/storage/models/.gitkeep
+!backend/storage/venvs/.gitkeep
+!backend/storage/logs/.gitkeep
+!backend/storage/configs/.gitkeep
+!backend/storage/annotations/.gitkeep
+!backend/storage/exports/.gitkeep
+!backend/storage/pretrained_models/.gitkeep
+!backend/storage/detectx_builds/.gitkeep
+!backend/storage/annotation_projects/.gitkeep
+!backend/storage/inference/.gitkeep
+
+# Root level storage (if exists)
+storage/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Environment files
+.env
+.env.local
+!.env.example
+!frontend/.env.example
+
+# Claude Code
+.claude/
+
+# Backups
+backups/
+backup_*.tar.gz
+
+# Logs
+*.log
+
+# Large files at root
+qr-code.png
+
+# Misc
+*.tmp
+*.temp
+.cache/
+ideas.md
+DETECTX_IMPLEMENTATION_PLAN.md
+ROADMAP.md

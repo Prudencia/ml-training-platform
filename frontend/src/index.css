@@ -1,0 +1,58 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+* {
+  /* Prevent horizontal overflow on mobile */
+  max-width: 100%;
+  box-sizing: border-box;
+}
+
+/* Exclude xterm.js from global CSS that interferes with character width calculations */
+.xterm,
+.xterm * {
+  max-width: none !important;
+  letter-spacing: 0 !important;
+  word-spacing: 0 !important;
+  font-variant-ligatures: none !important;
+}
+
+html, body {
+  overflow-x: hidden;
+  width: 100%;
+}
+
+body {
+  margin: 0;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen',
+    'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue',
+    sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  /* Better mobile touch interactions */
+  -webkit-tap-highlight-color: transparent;
+}
+
+code {
+  font-family: source-code-pro, Menlo, Monaco, Consolas, 'Courier New',
+    monospace;
+}
+
+/* Ensure modals don't cause horizontal scroll */
+.modal-overlay {
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+
+/* Better mobile table scrolling */
+@media (max-width: 768px) {
+  table {
+    font-size: 0.875rem;
+  }
+
+  /* Smooth scrolling for tables */
+  .overflow-x-auto {
+    -webkit-overflow-scrolling: touch;
+    scroll-behavior: smooth;
+  }
+}
