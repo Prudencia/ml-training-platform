@@ -14,6 +14,37 @@ router = APIRouter()
 STORAGE_PATH = Path("storage/datasets")
 STORAGE_PATH.mkdir(parents=True, exist_ok=True)
 
+
+def cleanup_orphaned_datasets(db: Session):
+    """Remove datasets from database if their folder was manually deleted"""
+    datasets = db.query(Dataset).all()
+    for dataset in datasets:
+        dataset_path = Path(dataset.path)
+        if not dataset_path.exists():
+            db.delete(dataset)
+    db.commit()
+
+
+def cleanup_orphaned_dataset_folders(db: Session):
+    """Remove dataset folders that don't have a database entry"""
+    if not STORAGE_PATH.exists():
+        return
+
+    # Get all valid dataset names from database
+    datasets = db.query(Dataset).all()
+    valid_folders = {d.name for d in datasets}
+
+    # Also add folder names from paths (in case path differs from name)
+    for d in datasets:
+        valid_folders.add(Path(d.path).name)
+
+    # Check each folder in datasets
+    for folder in STORAGE_PATH.iterdir():
+        if folder.is_dir() and folder.name not in valid_folders:
+            # Orphaned folder - remove it
+            shutil.rmtree(folder)
+
+
 class DatasetResponse(BaseModel):
     id: int
     name: str
@@ -32,6 +63,10 @@ class DatasetResponse(BaseModel):
 @router.get("/", response_model=List[DatasetResponse])
 async def list_datasets(db: Session = Depends(get_db)):
     """List all datasets"""
+    # Clean up orphaned entries on each listing
+    cleanup_orphaned_datasets(db)
+    cleanup_orphaned_dataset_folders(db)
+
     datasets = db.query(Dataset).all()
     return [DatasetResponse(
         id=d.id,
@@ -55,13 +90,16 @@ async def upload_dataset(
     db: Session = Depends(get_db)
 ):
     """Upload a dataset (zip file)"""
-    # Check if dataset name already exists
+    # Check if dataset name already exists in database
     existing = db.query(Dataset).filter(Dataset.name == name).first()
     if existing:
         raise HTTPException(status_code=400, detail=f"Dataset '{name}' already exists")
 
-    # Create dataset directory
+    # Create dataset directory - CLEAR if exists from previous DB (e.g., after DB reset)
     dataset_path = STORAGE_PATH / name
+    if dataset_path.exists():
+        # Remove old folder from previous installation/DB reset
+        shutil.rmtree(dataset_path)
     dataset_path.mkdir(parents=True, exist_ok=True)
 
     # Save uploaded file
@@ -432,13 +470,15 @@ async def import_dataset_from_url(
     import tempfile
     import zipfile
 
-    # Check if dataset name already exists
+    # Check if dataset name already exists in database
     existing = db.query(Dataset).filter(Dataset.name == request.name).first()
     if existing:
         raise HTTPException(status_code=400, detail=f"Dataset '{request.name}' already exists")
 
-    # Create dataset directory
+    # Create dataset directory - CLEAR if exists from previous DB (e.g., after DB reset)
     dataset_path = STORAGE_PATH / request.name
+    if dataset_path.exists():
+        shutil.rmtree(dataset_path)
     dataset_path.mkdir(parents=True, exist_ok=True)
 
     try:
@@ -506,13 +546,15 @@ async def import_coco_dataset(
     """Import a COCO format dataset and convert to YOLO format"""
     import zipfile
 
-    # Check if dataset name already exists
+    # Check if dataset name already exists in database
     existing = db.query(Dataset).filter(Dataset.name == name).first()
     if existing:
         raise HTTPException(status_code=400, detail=f"Dataset '{name}' already exists")
 
-    # Create dataset directory
+    # Create dataset directory - CLEAR if exists from previous DB (e.g., after DB reset)
     dataset_path = STORAGE_PATH / name
+    if dataset_path.exists():
+        shutil.rmtree(dataset_path)
     dataset_path.mkdir(parents=True, exist_ok=True)
 
     try:
