@@ -3,6 +3,10 @@ FROM python:3.11-slim
 
 WORKDIR /app
 
+# Set timezone to match host (default to Europe/Stockholm, can override with TZ env var)
+ENV TZ=Europe/Stockholm
+RUN ln -snf /usr/share/zoneinfo/$TZ /etc/localtime && echo $TZ > /etc/timezone
+
 # Install system dependencies and pyenv prerequisites
 RUN apt-get update && apt-get install -y \
     git \

@@ -279,9 +279,18 @@ function VirtualEnvs() {
                       {/* Setup Progress */}
                       {isSettingUp && (
                         <div className="mt-3 p-3 bg-white rounded border border-purple-200">
-                          <div className="flex items-center gap-2 text-purple-700 text-sm font-medium mb-2">
-                            <Loader2 size={16} className="animate-spin" />
-                            <span>Setting up...</span>
+                          <div className="flex items-center justify-between mb-2">
+                            <div className="flex items-center gap-2 text-purple-700 text-sm font-medium">
+                              <Loader2 size={16} className="animate-spin" />
+                              <span>Setting up...</span>
+                            </div>
+                            <button
+                              onClick={() => handleCancelSetup(preset.name)}
+                              className="px-2 py-1 bg-red-100 text-red-700 text-xs rounded hover:bg-red-200 flex items-center gap-1"
+                            >
+                              <X size={12} />
+                              Cancel
+                            </button>
                           </div>
                           <div className="text-xs text-gray-600 space-y-1">
                             <p><span className="font-medium">Step:</span> {status.step}</p>
@@ -310,39 +319,32 @@ function VirtualEnvs() {
                     </div>
 
                     {/* Action Buttons */}
-                    <div className="ml-4 flex flex-col gap-2">
-                      {!preset.exists && !isSettingUp && !hasFailed && (
-                        <button
-                          onClick={() => handleSetupPreset(preset.name)}
-                          className="px-4 py-2 bg-purple-600 text-white text-sm rounded-lg hover:bg-purple-700 whitespace-nowrap"
-                        >
-                          Setup
-                        </button>
-                      )}
-                      {isSettingUp && (
-                        <button
-                          onClick={() => handleCancelSetup(preset.name)}
-                          className="px-3 py-2 bg-red-100 text-red-700 text-sm rounded-lg hover:bg-red-200 whitespace-nowrap flex items-center gap-1"
-                        >
-                          <X size={14} />
-                          Cancel
-                        </button>
-                      )}
-                      {hasFailed && (
-                        <button
-                          onClick={() => {
-                            setSetupStatus(prev => {
-                              const newStatus = { ...prev }
-                              delete newStatus[preset.name]
-                              return newStatus
-                            })
-                          }}
-                          className="px-4 py-2 bg-purple-600 text-white text-sm rounded-lg hover:bg-purple-700 whitespace-nowrap"
-                        >
-                          Retry
-                        </button>
-                      )}
-                    </div>
+                    {!isSettingUp && (
+                      <div className="ml-4 flex flex-col gap-2">
+                        {!preset.exists && !hasFailed && (
+                          <button
+                            onClick={() => handleSetupPreset(preset.name)}
+                            className="px-4 py-2 bg-purple-600 text-white text-sm rounded-lg hover:bg-purple-700 whitespace-nowrap"
+                          >
+                            Setup
+                          </button>
+                        )}
+                        {hasFailed && (
+                          <button
+                            onClick={() => {
+                              setSetupStatus(prev => {
+                                const newStatus = { ...prev }
+                                delete newStatus[preset.name]
+                                return newStatus
+                              })
+                            }}
+                            className="px-4 py-2 bg-purple-600 text-white text-sm rounded-lg hover:bg-purple-700 whitespace-nowrap"
+                          >
+                            Retry
+                          </button>
+                        )}
+                      </div>
+                    )}
                   </div>
                 </div>
               )
