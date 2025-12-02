@@ -1,6 +1,6 @@
-import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect, useRef } from 'react'
 import { venvsAPI } from '../services/api'
-import { Zap, Package, CheckCircle } from 'lucide-react'
+import { Zap, Package, CheckCircle, Loader2, X, AlertCircle } from 'lucide-react'
 
 function VirtualEnvs() {
   const [venvs, setVenvs] = useState([])
@@ -10,17 +10,43 @@ function VirtualEnvs() {
   const [packages, setPackages] = useState([])
   const [newPackage, setNewPackage] = useState('')
   const [isCreating, setIsCreating] = useState(false)
-  const [settingUpPreset, setSettingUpPreset] = useState(null)
+  const [setupStatus, setSetupStatus] = useState({}) // { presetName: { status, step, last_message, error } }
   const [newVenv, setNewVenv] = useState({
     name: '',
     description: '',
     github_repo: ''
   })
+  const pollIntervalRef = useRef(null)
 
   useEffect(() => {
     loadVenvs()
     loadPresets()
+
+    // Check for any running setups on mount
+    checkRunningSetups()
+
+    return () => {
+      if (pollIntervalRef.current) {
+        clearInterval(pollIntervalRef.current)
+      }
+    }
   }, [])
+
+  const checkRunningSetups = async () => {
+    // Check status for all known presets
+    const presetNames = ['axis_yolov5', 'DetectX']
+    for (const name of presetNames) {
+      try {
+        const res = await venvsAPI.getSetupStatus(name)
+        if (res.data.status === 'running' || res.data.status === 'starting') {
+          setSetupStatus(prev => ({ ...prev, [name]: res.data }))
+          startPolling(name)
+        }
+      } catch (e) {
+        // Ignore errors - preset may not have any setup in progress
+      }
+    }
+  }
 
   const loadVenvs = async () => {
     try {
@@ -40,18 +66,70 @@ function VirtualEnvs() {
     }
   }
 
+  const startPolling = (presetName) => {
+    // Clear any existing interval for this preset
+    if (pollIntervalRef.current) {
+      clearInterval(pollIntervalRef.current)
+    }
+
+    pollIntervalRef.current = setInterval(async () => {
+      try {
+        const res = await venvsAPI.getSetupStatus(presetName)
+        setSetupStatus(prev => ({ ...prev, [presetName]: res.data }))
+
+        if (res.data.status === 'completed') {
+          clearInterval(pollIntervalRef.current)
+          pollIntervalRef.current = null
+          await loadVenvs()
+          await loadPresets()
+        } else if (res.data.status === 'failed') {
+          clearInterval(pollIntervalRef.current)
+          pollIntervalRef.current = null
+        }
+      } catch (e) {
+        console.error('Failed to poll setup status:', e)
+      }
+    }, 2000) // Poll every 2 seconds
+  }
+
   const handleSetupPreset = async (presetName) => {
-    setSettingUpPreset(presetName)
     try {
+      // Start the setup (returns immediately now)
       await venvsAPI.setupPreset(presetName)
-      await loadVenvs()
-      await loadPresets()
-      alert(`${presetName} environment created successfully!`)
+
+      // Initialize status
+      setSetupStatus(prev => ({
+        ...prev,
+        [presetName]: { status: 'starting', step: 'initializing', last_message: 'Starting setup...' }
+      }))
+
+      // Start polling for status
+      startPolling(presetName)
     } catch (error) {
       console.error('Failed to setup preset:', error)
-      alert('Failed to create environment: ' + (error.response?.data?.detail || error.message))
-    } finally {
-      setSettingUpPreset(null)
+      const errorMsg = error.response?.data?.detail || error.message
+      setSetupStatus(prev => ({
+        ...prev,
+        [presetName]: { status: 'failed', error: errorMsg }
+      }))
+    }
+  }
+
+  const handleCancelSetup = async (presetName) => {
+    try {
+      await venvsAPI.cancelSetup(presetName)
+      if (pollIntervalRef.current) {
+        clearInterval(pollIntervalRef.current)
+        pollIntervalRef.current = null
+      }
+      setSetupStatus(prev => {
+        const newStatus = { ...prev }
+        delete newStatus[presetName]
+        return newStatus
+      })
+      await loadPresets()
+    } catch (error) {
+      console.error('Failed to cancel setup:', error)
     }
   }
 
@@ -140,8 +218,10 @@ function VirtualEnvs() {
     }
   }
 
-  // Check if any presets need setup
+  // Check if any presets need setup or have active setup
   const missingPresets = presets.filter(p => !p.exists)
+  const hasActiveSetup = Object.values(setupStatus).some(s => s.status === 'running' || s.status === 'starting' || s.status === 'failed')
+  const showQuickSetup = missingPresets.length > 0 || hasActiveSetup
 
   return (
     <div className="space-y-4 sm:space-y-6">
@@ -156,7 +236,7 @@ function VirtualEnvs() {
       </div>
 
       {/* Quick Setup Section */}
-      {missingPresets.length > 0 && (
+      {showQuickSetup && (
         <div className="bg-gradient-to-r from-purple-50 to-indigo-50 border border-purple-200 rounded-lg p-6">
           <div className="flex items-center gap-2 mb-4">
             <Zap className="text-purple-600" size={24} />
@@ -166,48 +246,107 @@ function VirtualEnvs() {
             Set up required environments for the Axis YOLOv5 training and ACAP deployment workflow.
           </p>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {presets.map((preset) => (
-              <div
-                key={preset.name}
-                className={`p-4 rounded-lg border ${
-                  preset.exists
-                    ? 'bg-green-50 border-green-200'
-                    : 'bg-white border-gray-200'
-                }`}
-              >
-                <div className="flex items-start justify-between">
-                  <div className="flex-1">
-                    <div className="flex items-center gap-2">
-                      <Package size={18} className={preset.exists ? 'text-green-600' : 'text-gray-500'} />
-                      <h3 className="font-semibold text-gray-900">{preset.name}</h3>
-                      {preset.exists && (
-                        <CheckCircle size={16} className="text-green-600" />
+            {presets.map((preset) => {
+              const status = setupStatus[preset.name]
+              const isSettingUp = status && (status.status === 'running' || status.status === 'starting')
+              const hasFailed = status && status.status === 'failed'
+              const hasCompleted = status && status.status === 'completed'
+
+              return (
+                <div
+                  key={preset.name}
+                  className={`p-4 rounded-lg border ${
+                    preset.exists || hasCompleted
+                      ? 'bg-green-50 border-green-200'
+                      : hasFailed
+                      ? 'bg-red-50 border-red-200'
+                      : isSettingUp
+                      ? 'bg-purple-50 border-purple-200'
+                      : 'bg-white border-gray-200'
+                  }`}
+                >
+                  <div className="flex items-start justify-between">
+                    <div className="flex-1">
+                      <div className="flex items-center gap-2">
+                        <Package size={18} className={preset.exists ? 'text-green-600' : isSettingUp ? 'text-purple-600' : 'text-gray-500'} />
+                        <h3 className="font-semibold text-gray-900">{preset.name}</h3>
+                        {preset.exists && (
+                          <CheckCircle size={16} className="text-green-600" />
+                        )}
+                      </div>
+                      <p className="text-sm text-gray-600 mt-1">{preset.description}</p>
+
+                      {/* Setup Progress */}
+                      {isSettingUp && (
+                        <div className="mt-3 p-3 bg-white rounded border border-purple-200">
+                          <div className="flex items-center gap-2 text-purple-700 text-sm font-medium mb-2">
+                            <Loader2 size={16} className="animate-spin" />
+                            <span>Setting up...</span>
+                          </div>
+                          <div className="text-xs text-gray-600 space-y-1">
+                            <p><span className="font-medium">Step:</span> {status.step}</p>
+                            <p className="truncate"><span className="font-medium">Status:</span> {status.last_message}</p>
+                          </div>
+                          {status.recent_logs && status.recent_logs.length > 0 && (
+                            <div className="mt-2 max-h-24 overflow-y-auto text-xs font-mono bg-gray-900 text-green-400 p-2 rounded">
+                              {status.recent_logs.slice(-5).map((log, i) => (
+                                <div key={i}>{log}</div>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      )}
+
+                      {/* Failed State */}
+                      {hasFailed && (
+                        <div className="mt-3 p-3 bg-red-100 rounded border border-red-200">
+                          <div className="flex items-center gap-2 text-red-700 text-sm font-medium">
+                            <AlertCircle size={16} />
+                            <span>Setup Failed</span>
+                          </div>
+                          <p className="text-xs text-red-600 mt-1">{status.error}</p>
+                        </div>
                       )}
                     </div>
-                    <p className="text-sm text-gray-600 mt-1">{preset.description}</p>
-                  </div>
-                  {!preset.exists && (
-                    <button
-                      onClick={() => handleSetupPreset(preset.name)}
-                      disabled={settingUpPreset !== null}
-                      className="px-4 py-2 bg-purple-600 text-white text-sm rounded-lg hover:bg-purple-700 disabled:opacity-50 disabled:cursor-not-allowed whitespace-nowrap ml-4"
-                    >
-                      {settingUpPreset === preset.name ? (
-                        <span className="flex items-center gap-2">
-                          <svg className="animate-spin h-4 w-4" viewBox="0 0 24 24">
-                            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
-                            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
-                          </svg>
-                          Setting up...
-                        </span>
-                      ) : (
-                        'Setup'
+
+                    {/* Action Buttons */}
+                    <div className="ml-4 flex flex-col gap-2">
+                      {!preset.exists && !isSettingUp && !hasFailed && (
+                        <button
+                          onClick={() => handleSetupPreset(preset.name)}
+                          className="px-4 py-2 bg-purple-600 text-white text-sm rounded-lg hover:bg-purple-700 whitespace-nowrap"
+                        >
+                          Setup
+                        </button>
                       )}
-                    </button>
-                  )}
+                      {isSettingUp && (
+                        <button
+                          onClick={() => handleCancelSetup(preset.name)}
+                          className="px-3 py-2 bg-red-100 text-red-700 text-sm rounded-lg hover:bg-red-200 whitespace-nowrap flex items-center gap-1"
+                        >
+                          <X size={14} />
+                          Cancel
+                        </button>
+                      )}
+                      {hasFailed && (
+                        <button
+                          onClick={() => {
+                            setSetupStatus(prev => {
+                              const newStatus = { ...prev }
+                              delete newStatus[preset.name]
+                              return newStatus
+                            })
+                          }}
+                          className="px-4 py-2 bg-purple-600 text-white text-sm rounded-lg hover:bg-purple-700 whitespace-nowrap"
+                        >
+                          Retry
+                        </button>
+                      )}
+                    </div>
+                  </div>
                 </div>
-              </div>
-            ))}
+              )
+            })}
           </div>
         </div>
       )}

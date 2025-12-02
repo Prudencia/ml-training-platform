@@ -43,7 +43,10 @@ export const venvsAPI = {
   delete: (id) => api.delete(`/api/venv/${id}`),
   // Preset venvs
   getPresets: () => api.get('/api/venv/presets/available'),
-  setupPreset: (presetName) => api.post(`/api/venv/presets/setup/${presetName}`, null, { timeout: 600000 }),
+  setupPreset: (presetName) => api.post(`/api/venv/presets/setup/${presetName}`),
+  getSetupStatus: (presetName) => api.get(`/api/venv/presets/setup/${presetName}/status`),
+  getSetupLog: (presetName) => api.get(`/api/venv/presets/setup/${presetName}/log`),
+  cancelSetup: (presetName) => api.delete(`/api/venv/presets/setup/${presetName}`),
 }
 
 // Training API
