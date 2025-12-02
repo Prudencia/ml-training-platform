@@ -37,6 +37,26 @@ app.add_middleware(
 async def startup_event():
     init_db()
 
+
+# Clean up all running training processes on shutdown
+@app.on_event("shutdown")
+async def shutdown_event():
+    """Clean up all running training processes on shutdown."""
+    import signal
+    from api.training import active_processes, kill_process_tree
+
+    for job_id, process in list(active_processes.items()):
+        try:
+            kill_process_tree(process.pid)
+            process.wait(timeout=5)
+        except Exception:
+            try:
+                os.killpg(os.getpgid(process.pid), signal.SIGKILL)
+            except Exception:
+                pass
+    active_processes.clear()
+
+
 # Include API routers
 app.include_router(datasets.router, prefix="/api/datasets", tags=["datasets"])
 app.include_router(training.router, prefix="/api/training", tags=["training"])

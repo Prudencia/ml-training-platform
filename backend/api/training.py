@@ -23,6 +23,47 @@ MODELS_PATH.mkdir(parents=True, exist_ok=True)
 # Store active training processes
 active_processes = {}
 
+
+def kill_process_tree(pid, sig=signal.SIGTERM):
+    """Kill a process and all its children (including CUDA workers)."""
+    try:
+        # Try using psutil if available for reliable child process killing
+        import psutil
+        try:
+            parent = psutil.Process(pid)
+            children = parent.children(recursive=True)
+
+            # Kill children first
+            for child in children:
+                try:
+                    child.kill()
+                except psutil.NoSuchProcess:
+                    pass
+
+            # Kill parent
+            try:
+                parent.kill()
+            except psutil.NoSuchProcess:
+                pass
+
+            # Wait for all to die
+            gone, alive = psutil.wait_procs(children + [parent], timeout=5)
+            for p in alive:
+                try:
+                    p.kill()
+                except psutil.NoSuchProcess:
+                    pass
+        except psutil.NoSuchProcess:
+            pass
+    except ImportError:
+        # Fallback: use process group kill (Linux)
+        try:
+            os.killpg(os.getpgid(pid), sig)
+        except (ProcessLookupError, OSError):
+            pass
+    except Exception:
+        pass
+
 class TrainingCreate(BaseModel):
     name: str
     venv_id: int
@@ -73,6 +114,13 @@ async def list_training_jobs(db: Session = Depends(get_db)):
                         j.error_message = f"Process exited with code {process.returncode}"
                     j.current_epoch = j.total_epochs
                     db.commit()
+
+                    # Ensure all child processes are cleaned up (including CUDA workers)
+                    kill_process_tree(process.pid)
+                    try:
+                        process.wait()  # Reap zombie
+                    except Exception:
+                        pass
                     del active_processes[j.id]
             elif j.pid:
                 # Process not in active_processes (e.g., after server restart)
@@ -252,7 +300,8 @@ async def start_training(training_data: TrainingCreate, db: Session = Depends(ge
                 cmd,
                 stdout=log_f,
                 stderr=subprocess.STDOUT,
-                cwd=str(venv_path / "repo")
+                cwd=str(venv_path / "repo"),
+                preexec_fn=os.setsid  # Create new process group for clean termination
             )
 
         # Store process
@@ -288,14 +337,19 @@ async def stop_training(job_id: int, db: Session = Depends(get_db)):
     if job.status != "running":
         raise HTTPException(status_code=400, detail="Training job is not running")
 
-    # Kill process
+    # Kill process and all children (including CUDA workers)
     if job_id in active_processes:
         process = active_processes[job_id]
-        process.terminate()
+        kill_process_tree(process.pid)
         try:
-            process.wait(timeout=5)
+            process.wait(timeout=10)
         except subprocess.TimeoutExpired:
-            process.kill()
+            # Force kill the process group
+            try:
+                os.killpg(os.getpgid(process.pid), signal.SIGKILL)
+                process.wait(timeout=5)
+            except (ProcessLookupError, OSError, subprocess.TimeoutExpired):
+                pass
         del active_processes[job_id]
 
     job.status = "paused"
@@ -447,7 +501,8 @@ async def resume_training(job_id: int, resume_data: ResumeTrainingRequest, db: S
                 cmd,
                 stdout=log_f,
                 stderr=subprocess.STDOUT,
-                cwd=str(venv_path / "repo")
+                cwd=str(venv_path / "repo"),
+                preexec_fn=os.setsid  # Create new process group for clean termination
             )
 
         # Store process
@@ -495,6 +550,13 @@ async def get_training_job(job_id: int, db: Session = Depends(get_db)):
             if process.returncode != 0:
                 job.error_message = f"Process exited with code {process.returncode}"
             db.commit()
+
+            # Ensure all child processes are cleaned up (including CUDA workers)
+            kill_process_tree(process.pid)
+            try:
+                process.wait()  # Reap zombie
+            except Exception:
+                pass
             del active_processes[job.id]
     elif job.status == "running" and job.pid:
         # Process not in active_processes (e.g., after server restart)
@@ -720,10 +782,18 @@ async def delete_training_job(job_id: int, db: Session = Depends(get_db)):
     if not job:
         raise HTTPException(status_code=404, detail="Training job not found")
 
-    # Stop if running
+    # Stop if running - kill entire process tree
     if job.status == "running" and job_id in active_processes:
         process = active_processes[job_id]
-        process.terminate()
+        kill_process_tree(process.pid)
+        try:
+            process.wait(timeout=10)
+        except subprocess.TimeoutExpired:
+            try:
+                os.killpg(os.getpgid(process.pid), signal.SIGKILL)
+                process.wait(timeout=5)
+            except (ProcessLookupError, OSError, subprocess.TimeoutExpired):
+                pass
         del active_processes[job_id]
 
     # Delete database entry
@@ -871,7 +941,8 @@ async def start_next_queued_job(db: Session = Depends(get_db)):
                 cmd,
                 stdout=log_f,
                 stderr=subprocess.STDOUT,
-                cwd=str(venv_path / "repo")
+                cwd=str(venv_path / "repo"),
+                preexec_fn=os.setsid  # Create new process group for clean termination
             )
 
         active_processes[next_job.id] = process
