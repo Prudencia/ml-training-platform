@@ -5,6 +5,25 @@ from pathlib import Path
 
 router = APIRouter()
 
+def get_cpu_model():
+    """Get CPU model name from /proc/cpuinfo or platform"""
+    # Try platform.processor() first
+    proc = platform.processor()
+    if proc:
+        return proc
+
+    # On Linux, read from /proc/cpuinfo
+    try:
+        with open("/proc/cpuinfo", "r") as f:
+            for line in f:
+                if line.startswith("model name"):
+                    return line.split(":")[1].strip()
+    except:
+        pass
+
+    return "Unknown"
+
+
 @router.get("/info")
 async def get_system_info():
     """Get system information"""
@@ -12,7 +31,7 @@ async def get_system_info():
         "platform": platform.system(),
         "platform_version": platform.version(),
         "architecture": platform.machine(),
-        "processor": platform.processor(),
+        "processor": get_cpu_model(),
         "python_version": platform.python_version()
     }
 
