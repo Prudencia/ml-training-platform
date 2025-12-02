@@ -139,6 +139,8 @@ cd ml-training-platform
 docker compose up --build -d
 ```
 
+**Note:** GPU support is enabled by default. If you don't have an NVIDIA GPU or nvidia-container-toolkit installed, comment out the `deploy` section in `docker-compose.yml` before building (see [GPU Support](#gpu-support-in-docker) for details).
+
 Access:
 - **Frontend**: `http://localhost:3080`
 - **Backend API**: `http://localhost:8081`
@@ -308,49 +310,51 @@ services:
 
 ### GPU Support in Docker
 
-Choose the appropriate option in `docker-compose.yml` based on your setup. You must uncomment **both** the key and value lines (remove the `#` from both lines).
+GPU support is **enabled by default** in `docker-compose.yml` using the deploy syntax. This requires nvidia-container-toolkit to be installed on the host system.
 
-**Option 1: Deploy syntax (Recommended for WSL2 and Native Linux)**
-
-Edit `docker-compose.yml` and uncomment these lines under the backend service:
+**If you don't have an NVIDIA GPU**, comment out the deploy section in `docker-compose.yml`:
 ```yaml
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: all
-              capabilities: [gpu]
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: all
+    #           capabilities: [gpu]
 ```
 
-This works out of the box on most systems with nvidia-container-toolkit installed.
+**If GPU is not detected** (works on WSL2 and Native Linux with nvidia-container-toolkit):
+```bash
+# Install nvidia-container-toolkit
+sudo apt-get update
+sudo apt-get install -y nvidia-container-toolkit
+sudo systemctl restart docker
 
-**Option 2: CDI mode (Alternative)**
+# Rebuild container
+docker compose down
+docker compose up --build -d
 
-If Option 1 doesn't work, try CDI mode. Edit `docker-compose.yml` and uncomment:
+# Verify GPU is accessible
+docker exec -it ml-training-platform-backend-1 nvidia-smi
+```
+
+**Alternative: CDI mode**
+
+If the default deploy syntax doesn't work, you can try CDI mode instead. Edit `docker-compose.yml`:
 ```yaml
+    # Comment out the deploy section, then add:
     devices:
       - nvidia.com/gpu=all
 ```
 
 CDI mode requires additional setup:
 ```bash
-# Install nvidia-container-toolkit if not already installed
-sudo apt-get update
-sudo apt-get install -y nvidia-container-toolkit
-
-# Generate CDI spec
 sudo nvidia-ctk cdi generate --output=/etc/cdi/nvidia.yaml
-
-# Enable CDI in Docker
 echo '{"features":{"cdi":true}}' | sudo tee /etc/docker/daemon.json
 sudo service docker restart
-
-# Verify GPU works in Docker
-docker run --rm --device nvidia.com/gpu=all nvidia/cuda:12.6.0-base-ubuntu24.04 nvidia-smi
 ```
 
-**After enabling GPU support:**
+**Rebuilding after changes:**
 ```bash
 docker compose down
 docker compose up --build -d

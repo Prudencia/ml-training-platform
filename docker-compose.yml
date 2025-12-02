@@ -14,20 +14,15 @@ services:
       - PYTHONUNBUFFERED=1
     shm_size: '8gb'  # Increase shared memory for PyTorch DataLoader workers
     restart: unless-stopped
-    # GPU support - choose ONE option based on your setup:
-    #
-    # Option 1: Deploy syntax (Recommended for WSL2 and Native Linux)
-    # deploy:
-    #   resources:
-    #     reservations:
-    #       devices:
-    #         - driver: nvidia
-    #           count: all
-    #           capabilities: [gpu]
-    #
-    # Option 2: CDI mode (Alternative - requires additional setup)
-    # devices:
-    #   - nvidia.com/gpu=all
+    # GPU support enabled by default (requires nvidia-container-toolkit)
+    # Comment out the deploy section below if you don't have an NVIDIA GPU
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
 
   frontend:
     build:
