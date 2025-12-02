@@ -310,15 +310,30 @@ services:
 
 Choose the appropriate option in `docker-compose.yml` based on your setup. You must uncomment **both** the key and value lines (remove the `#` from both lines).
 
-**Option 1: WSL2 (Windows Subsystem for Linux)**
+**Option 1: Deploy syntax (Recommended for WSL2 and Native Linux)**
 
-Edit `docker compose.yml` and uncomment these lines under the backend service:
+Edit `docker-compose.yml` and uncomment these lines under the backend service:
+```yaml
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+```
+
+This works out of the box on most systems with nvidia-container-toolkit installed.
+
+**Option 2: CDI mode (Alternative)**
+
+If Option 1 doesn't work, try CDI mode. Edit `docker-compose.yml` and uncomment:
 ```yaml
     devices:
       - nvidia.com/gpu=all
 ```
 
-Before this works, you need to enable CDI mode in Docker (one-time setup):
+CDI mode requires additional setup:
 ```bash
 # Install nvidia-container-toolkit if not already installed
 sudo apt-get update
@@ -333,19 +348,6 @@ sudo service docker restart
 
 # Verify GPU works in Docker
 docker run --rm --device nvidia.com/gpu=all nvidia/cuda:12.6.0-base-ubuntu24.04 nvidia-smi
-```
-
-**Option 2: Native Linux**
-
-Edit `docker-compose.yml` and uncomment these lines under the backend service:
-```yaml
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: all
-              capabilities: [gpu]
 ```
 
 **After enabling GPU support:**
