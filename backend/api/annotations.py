@@ -1039,15 +1039,22 @@ async def serve_image(
                     return StreamingResponse(
                         io.BytesIO(buffer.tobytes()),
                         media_type="image/jpeg",
-                        headers={"Cache-Control": "public, max-age=86400"}  # Browser cache for 24h
+                        headers={"Cache-Control": "no-cache, must-revalidate"}
                     )
         except Exception as e:
             # Fall back to full image on error
             pass
 
+    # Use no-cache so browser validates with server before using cached version
+    # This prevents stale images after folder cleanup/rebuild
+    stat = file_path.stat()
+    etag = f'"{image_id}-{int(stat.st_mtime)}"'
     return FileResponse(
         file_path,
-        headers={"Cache-Control": "public, max-age=31536000"}
+        headers={
+            "Cache-Control": "no-cache, must-revalidate",
+            "ETag": etag
+        }
     )
 
 
@@ -1070,7 +1077,15 @@ async def serve_thumbnail(project_id: int, image_id: int, db: Session = Depends(
         # Fall back to full image
         return await serve_image(project_id, image_id, db)
 
-    return FileResponse(thumb_path)
+    stat = thumb_path.stat()
+    etag = f'"{image_id}-thumb-{int(stat.st_mtime)}"'
+    return FileResponse(
+        thumb_path,
+        headers={
+            "Cache-Control": "no-cache, must-revalidate",
+            "ETag": etag
+        }
+    )
 
 
 @router.delete("/projects/{project_id}/images/{image_id}")
