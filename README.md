@@ -136,7 +136,7 @@ The easiest way to get started:
 ```bash
 git clone https://github.com/Prudencia/ml-training-platform.git
 cd ml-training-platform
-docker-compose up --build -d
+docker compose up --build -d
 ```
 
 Access:
