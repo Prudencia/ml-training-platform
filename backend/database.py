@@ -220,6 +220,7 @@ class AnnotationProject(Base):
     __tablename__ = "annotation_projects"
 
     id = Column(Integer, primary_key=True, index=True)
+    folder_id = Column(String, unique=True, index=True)  # UUID for folder name, prevents ID collision
     name = Column(String, unique=True, index=True)
     description = Column(Text, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)

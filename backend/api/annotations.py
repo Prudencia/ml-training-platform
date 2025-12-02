@@ -34,6 +34,14 @@ STORAGE_PATH = Path("storage")
 ANNOTATION_PROJECTS_PATH = STORAGE_PATH / "annotation_projects"
 ANNOTATION_PROJECTS_PATH.mkdir(parents=True, exist_ok=True)
 
+def get_project_folder(project: AnnotationProject) -> Path:
+    """Get the folder path for a project, using folder_id if available, else falling back to id"""
+    if project.folder_id:
+        return ANNOTATION_PROJECTS_PATH / project.folder_id
+    # Legacy fallback for old projects without folder_id
+    return ANNOTATION_PROJECTS_PATH / str(project.id)
+
+
 # Class colors for auto-assignment
 CLASS_COLORS = [
     "#EF4444",  # red
@@ -259,9 +267,44 @@ class ExportConfig(BaseModel):
 
 # ============ Project Endpoints ============
 
+def cleanup_orphaned_projects(db: Session):
+    """Remove projects from database if their folder was manually deleted"""
+    projects = db.query(AnnotationProject).all()
+    for project in projects:
+        project_path = get_project_folder(project)
+        if not project_path.exists():
+            # Folder was manually deleted, remove from database
+            db.delete(project)
+    db.commit()
+
+
+def cleanup_orphaned_folders(db: Session):
+    """Remove folders that don't have a database entry"""
+    if not ANNOTATION_PROJECTS_PATH.exists():
+        return
+
+    # Get all valid folder_ids and legacy IDs from database
+    projects = db.query(AnnotationProject).all()
+    valid_folders = set()
+    for p in projects:
+        if p.folder_id:
+            valid_folders.add(p.folder_id)
+        valid_folders.add(str(p.id))  # Legacy folders use numeric ID
+
+    # Check each folder in annotation_projects
+    for folder in ANNOTATION_PROJECTS_PATH.iterdir():
+        if folder.is_dir() and folder.name not in valid_folders:
+            # Orphaned folder - remove it
+            shutil.rmtree(folder)
+
+
 @router.get("/projects")
 async def list_projects(db: Session = Depends(get_db)):
     """List all annotation projects"""
+    # Clean up orphaned entries on each listing
+    cleanup_orphaned_projects(db)
+    cleanup_orphaned_folders(db)
+
     projects = db.query(AnnotationProject).order_by(AnnotationProject.updated_at.desc()).all()
 
     result = []
@@ -297,10 +340,14 @@ async def create_project(project: ProjectCreate, db: Session = Depends(get_db)):
     if existing:
         raise HTTPException(status_code=400, detail="Project with this name already exists")
 
+    # Generate unique folder ID
+    folder_id = uuid.uuid4().hex
+
     # Create project
     new_project = AnnotationProject(
         name=project.name,
         description=project.description,
+        folder_id=folder_id,
         preprocessing_config={},
         augmentation_config={},
     )
@@ -308,11 +355,8 @@ async def create_project(project: ProjectCreate, db: Session = Depends(get_db)):
     db.commit()
     db.refresh(new_project)
 
-    # Create project folder - clean up if exists from previous DB (e.g., after DB reset)
-    project_path = ANNOTATION_PROJECTS_PATH / str(new_project.id)
-    if project_path.exists():
-        # Remove old folder from previous installation/DB reset
-        shutil.rmtree(project_path)
+    # Create project folder using UUID (prevents ID collision after DB reset)
+    project_path = ANNOTATION_PROJECTS_PATH / folder_id
     (project_path / "images").mkdir(parents=True, exist_ok=True)
     (project_path / "thumbnails").mkdir(parents=True, exist_ok=True)
 
@@ -418,7 +462,7 @@ async def delete_project(project_id: int, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail="Project not found")
 
     # Delete project folder
-    project_path = ANNOTATION_PROJECTS_PATH / str(project_id)
+    project_path = get_project_folder(project)
     if project_path.exists():
         shutil.rmtree(project_path)
 
@@ -708,7 +752,7 @@ async def upload_images(
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
 
-    project_path = ANNOTATION_PROJECTS_PATH / str(project_id)
+    project_path = get_project_folder(project)
     images_path = project_path / "images"
     thumbnails_path = project_path / "thumbnails"
 
@@ -784,7 +828,7 @@ async def import_from_datasets(
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
 
-    project_path = ANNOTATION_PROJECTS_PATH / str(project_id)
+    project_path = get_project_folder(project)
     images_path = project_path / "images"
     thumbnails_path = project_path / "thumbnails"
 
@@ -1010,6 +1054,10 @@ async def serve_image(
 @router.get("/projects/{project_id}/images/{image_id}/thumbnail")
 async def serve_thumbnail(project_id: int, image_id: int, db: Session = Depends(get_db)):
     """Serve an image thumbnail"""
+    project = db.query(AnnotationProject).filter(AnnotationProject.id == project_id).first()
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+
     image = db.query(AnnotationImage).filter(
         AnnotationImage.id == image_id,
         AnnotationImage.project_id == project_id
@@ -1017,7 +1065,7 @@ async def serve_thumbnail(project_id: int, image_id: int, db: Session = Depends(
     if not image:
         raise HTTPException(status_code=404, detail="Image not found")
 
-    thumb_path = ANNOTATION_PROJECTS_PATH / str(project_id) / "thumbnails" / image.filename
+    thumb_path = get_project_folder(project) / "thumbnails" / image.filename
     if not thumb_path.exists():
         # Fall back to full image
         return await serve_image(project_id, image_id, db)
@@ -1028,6 +1076,10 @@ async def serve_thumbnail(project_id: int, image_id: int, db: Session = Depends(
 @router.delete("/projects/{project_id}/images/{image_id}")
 async def delete_image(project_id: int, image_id: int, db: Session = Depends(get_db)):
     """Delete an image and its annotations"""
+    project = db.query(AnnotationProject).filter(AnnotationProject.id == project_id).first()
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+
     image = db.query(AnnotationImage).filter(
         AnnotationImage.id == image_id,
         AnnotationImage.project_id == project_id
@@ -1040,7 +1092,7 @@ async def delete_image(project_id: int, image_id: int, db: Session = Depends(get
     if file_path.exists():
         file_path.unlink()
 
-    thumb_path = ANNOTATION_PROJECTS_PATH / str(project_id) / "thumbnails" / image.filename
+    thumb_path = get_project_folder(project) / "thumbnails" / image.filename
     if thumb_path.exists():
         thumb_path.unlink()
 
