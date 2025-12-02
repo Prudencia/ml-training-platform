@@ -308,8 +308,11 @@ async def create_project(project: ProjectCreate, db: Session = Depends(get_db)):
     db.commit()
     db.refresh(new_project)
 
-    # Create project folder
+    # Create project folder - clean up if exists from previous DB (e.g., after DB reset)
     project_path = ANNOTATION_PROJECTS_PATH / str(new_project.id)
+    if project_path.exists():
+        # Remove old folder from previous installation/DB reset
+        shutil.rmtree(project_path)
     (project_path / "images").mkdir(parents=True, exist_ok=True)
     (project_path / "thumbnails").mkdir(parents=True, exist_ok=True)
 
