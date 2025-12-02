@@ -312,7 +312,7 @@ Choose the appropriate option in `docker-compose.yml` based on your setup. You m
 
 **Option 1: WSL2 (Windows Subsystem for Linux)**
 
-Edit `docker-compose.yml` and uncomment these lines under the backend service:
+Edit `docker compose.yml` and uncomment these lines under the backend service:
 ```yaml
     devices:
       - nvidia.com/gpu=all
@@ -350,8 +350,8 @@ Edit `docker-compose.yml` and uncomment these lines under the backend service:
 
 **After enabling GPU support:**
 ```bash
-docker-compose down
-docker-compose up --build -d
+docker compose down
+docker compose up --build -d
 
 # Verify GPU is accessible inside the container
 docker exec -it ml-training-platform-backend-1 nvidia-smi
