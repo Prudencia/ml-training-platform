@@ -1,19 +1,26 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
 from sqlalchemy.orm import Session
-from typing import List, Optional
+from typing import List, Optional, Dict
 from pathlib import Path
 from pydantic import BaseModel
 import subprocess
 import sys
 import os
+import threading
+from datetime import datetime
 
-from database import get_db, VirtualEnvironment
+from database import get_db, VirtualEnvironment, SessionLocal
 from api.utils.axis_patch import verify_axis_patch, apply_axis_patch
 
 router = APIRouter()
 
 VENV_PATH = Path("storage/venvs")
 VENV_PATH.mkdir(parents=True, exist_ok=True)
+LOG_PATH = Path("storage/logs")
+LOG_PATH.mkdir(parents=True, exist_ok=True)
+
+# Track setup status in memory
+setup_status: Dict[str, dict] = {}
 
 class VenvCreate(BaseModel):
     name: str
@@ -358,117 +365,279 @@ def install_python_for_venv(version: str, venv_path: Path):
     return installed_python
 
 
+def run_setup_in_background(preset_name: str, config: dict, log_file: Path):
+    """Run venv setup in background thread with logging"""
+    import shutil
+
+    def log(msg: str):
+        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        line = f"[{timestamp}] {msg}\n"
+        with open(log_file, "a") as f:
+            f.write(line)
+        setup_status[preset_name]["last_message"] = msg
+
+    try:
+        setup_status[preset_name]["status"] = "running"
+        setup_status[preset_name]["step"] = "initializing"
+
+        venv_path = VENV_PATH / config["name"]
+        venv_path.mkdir(parents=True, exist_ok=True)
+
+        # Get Python executable
+        log(f"Starting setup for {preset_name}")
+        required_python = config.get("python_version")
+        if required_python:
+            setup_status[preset_name]["step"] = "installing_python"
+            log(f"Installing Python {required_python} via pyenv (this may take several minutes)...")
+            try:
+                python_exec = install_python_for_venv(required_python, venv_path)
+                log(f"Python installed: {python_exec}")
+            except Exception as e:
+                log(f"ERROR: Failed to install Python {required_python}: {str(e)}")
+                if venv_path.exists():
+                    shutil.rmtree(venv_path)
+                setup_status[preset_name]["status"] = "failed"
+                setup_status[preset_name]["error"] = str(e)
+                return
+        else:
+            python_exec = sys.executable
+            log(f"Using system Python: {python_exec}")
+
+        # Create venv
+        setup_status[preset_name]["step"] = "creating_venv"
+        log("Creating virtual environment...")
+        try:
+            result = subprocess.run(
+                [python_exec, "-m", "venv", str(venv_path)],
+                capture_output=True,
+                text=True,
+                check=True
+            )
+            log("Virtual environment created")
+        except subprocess.CalledProcessError as e:
+            log(f"ERROR: Failed to create venv: {e.stderr}")
+            if venv_path.exists():
+                shutil.rmtree(venv_path)
+            setup_status[preset_name]["status"] = "failed"
+            setup_status[preset_name]["error"] = e.stderr
+            return
+
+        python_bin = venv_path / "bin" / "python" if os.name != 'nt' else venv_path / "Scripts" / "python.exe"
+        result = subprocess.run([str(python_bin), "--version"], capture_output=True, text=True)
+        python_version = result.stdout.strip() or result.stderr.strip()
+        log(f"Python version: {python_version}")
+
+        # Upgrade pip
+        log("Upgrading pip...")
+        subprocess.run(
+            [str(python_bin), "-m", "pip", "install", "--upgrade", "pip"],
+            capture_output=True, text=True
+        )
+
+        # Clone GitHub repo
+        if config.get("github_repo"):
+            setup_status[preset_name]["step"] = "cloning_repo"
+            repo_path = venv_path / "repo"
+            log(f"Cloning repository: {config['github_repo']}")
+            try:
+                subprocess.run(
+                    ["git", "clone", config["github_repo"], str(repo_path)],
+                    check=True,
+                    capture_output=True,
+                    text=True
+                )
+                log("Repository cloned successfully")
+            except subprocess.CalledProcessError as e:
+                log(f"ERROR: Failed to clone repo: {e.stderr}")
+                shutil.rmtree(venv_path)
+                setup_status[preset_name]["status"] = "failed"
+                setup_status[preset_name]["error"] = e.stderr
+                return
+
+        # Install requirements
+        custom_req = config.get("custom_requirements")
+        if custom_req:
+            custom_req_path = Path(custom_req)
+            if custom_req_path.exists():
+                setup_status[preset_name]["step"] = "installing_requirements"
+                log(f"Installing requirements from {custom_req} (this may take 10-30 minutes)...")
+                log("Installing packages: TensorFlow, PyTorch, OpenCV, etc...")
+
+                # Run pip install with output streaming to log
+                try:
+                    process = subprocess.Popen(
+                        [str(python_bin), "-m", "pip", "install", "-r", str(custom_req_path)],
+                        stdout=subprocess.PIPE,
+                        stderr=subprocess.STDOUT,
+                        text=True,
+                        bufsize=1
+                    )
+
+                    # Stream output to log file
+                    for line in process.stdout:
+                        line = line.strip()
+                        if line:
+                            # Log significant lines
+                            if any(x in line.lower() for x in ['installing', 'collecting', 'downloading', 'error', 'successfully']):
+                                log(line)
+
+                    process.wait(timeout=1800)  # 30 min timeout
+
+                    if process.returncode != 0:
+                        log(f"ERROR: pip install failed with return code {process.returncode}")
+                        shutil.rmtree(venv_path)
+                        setup_status[preset_name]["status"] = "failed"
+                        setup_status[preset_name]["error"] = f"pip install failed with code {process.returncode}"
+                        return
+
+                    log("Requirements installed successfully")
+
+                except subprocess.TimeoutExpired:
+                    process.kill()
+                    log("ERROR: Installation timed out after 30 minutes")
+                    shutil.rmtree(venv_path)
+                    setup_status[preset_name]["status"] = "failed"
+                    setup_status[preset_name]["error"] = "Installation timed out (>30 min)"
+                    return
+
+        # Create database entry
+        setup_status[preset_name]["step"] = "finalizing"
+        log("Creating database entry...")
+        db = SessionLocal()
+        try:
+            new_venv = VirtualEnvironment(
+                name=config["name"],
+                path=str(venv_path),
+                python_version=python_version,
+                github_repo=config.get("github_repo"),
+                description=config["description"]
+            )
+            db.add(new_venv)
+            db.commit()
+            db.refresh(new_venv)
+            setup_status[preset_name]["venv_id"] = new_venv.id
+        finally:
+            db.close()
+
+        # Apply Axis patch if needed
+        if config.get("apply_axis_patch"):
+            log("Applying Axis YOLOv5 patch...")
+            patch_result = apply_axis_patch(str(venv_path))
+            log(f"Patch result: {patch_result}")
+
+        log(f"Setup completed successfully!")
+        setup_status[preset_name]["status"] = "completed"
+        setup_status[preset_name]["step"] = "done"
+
+    except Exception as e:
+        log(f"ERROR: Unexpected error: {str(e)}")
+        setup_status[preset_name]["status"] = "failed"
+        setup_status[preset_name]["error"] = str(e)
+
+
 @router.post("/presets/setup/{preset_name}")
 async def setup_preset_venv(preset_name: str, db: Session = Depends(get_db)):
-    """Create a preset virtual environment with predefined configuration"""
+    """Start preset virtual environment setup in background"""
     if preset_name not in PRESET_VENVS:
         raise HTTPException(status_code=404, detail=f"Unknown preset: {preset_name}. Available: {list(PRESET_VENVS.keys())}")
 
     config = PRESET_VENVS[preset_name]
 
-    # Check if already exists
+    # Check if already exists in DB
     existing = db.query(VirtualEnvironment).filter(VirtualEnvironment.name == config["name"]).first()
     if existing:
         raise HTTPException(status_code=400, detail=f"Virtual environment '{config['name']}' already exists")
 
+    # Check if setup is already running
+    if preset_name in setup_status and setup_status[preset_name].get("status") == "running":
+        raise HTTPException(status_code=400, detail=f"Setup for '{preset_name}' is already in progress")
+
+    # Check if directory exists but DB entry doesn't (cleanup leftover)
     venv_path = VENV_PATH / config["name"]
-    venv_path.mkdir(parents=True, exist_ok=True)
-
-    # Get Python executable - install specific version if required
-    required_python = config.get("python_version")
-    if required_python:
-        try:
-            python_exec = install_python_for_venv(required_python, venv_path)
-        except Exception as e:
-            import shutil
-            if venv_path.exists():
-                shutil.rmtree(venv_path)
-            raise HTTPException(status_code=500, detail=f"Failed to install Python {required_python}: {str(e)}")
-    else:
-        python_exec = sys.executable
-
-    # Create venv
-    try:
-        subprocess.run(
-            [python_exec, "-m", "venv", str(venv_path)],
-            check=True,
-            capture_output=True,
-            text=True
-        )
-    except subprocess.CalledProcessError as e:
+    if venv_path.exists():
         import shutil
-        if venv_path.exists():
-            shutil.rmtree(venv_path)
-        raise HTTPException(status_code=500, detail=f"Failed to create venv with {python_exec}: {e.stderr}")
+        shutil.rmtree(venv_path)
 
-    # Get Python version
-    python_bin = venv_path / "bin" / "python" if os.name != 'nt' else venv_path / "Scripts" / "python.exe"
-    result = subprocess.run([str(python_bin), "--version"], capture_output=True, text=True)
-    python_version = result.stdout.strip() or result.stderr.strip()
+    # Create log file
+    log_file = LOG_PATH / f"venv_setup_{preset_name}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log"
 
-    # Upgrade pip first
-    subprocess.run(
-        [str(python_bin), "-m", "pip", "install", "--upgrade", "pip"],
-        capture_output=True, text=True
+    # Initialize status
+    setup_status[preset_name] = {
+        "status": "starting",
+        "step": "initializing",
+        "log_file": str(log_file),
+        "started_at": datetime.now().isoformat(),
+        "last_message": "Starting setup...",
+        "error": None,
+        "venv_id": None
+    }
+
+    # Start background thread
+    thread = threading.Thread(
+        target=run_setup_in_background,
+        args=(preset_name, config, log_file),
+        daemon=True
     )
-
-    # Clone GitHub repo
-    if config.get("github_repo"):
-        repo_path = venv_path / "repo"
-        try:
-            subprocess.run(
-                ["git", "clone", config["github_repo"], str(repo_path)],
-                check=True,
-                capture_output=True,
-                text=True
-            )
-        except subprocess.CalledProcessError as e:
-            import shutil
-            shutil.rmtree(venv_path)
-            raise HTTPException(status_code=500, detail=f"Failed to clone from GitHub: {e.stderr}")
-
-    # Install custom requirements if specified (takes priority over repo requirements)
-    custom_req = config.get("custom_requirements")
-    if custom_req:
-        custom_req_path = Path(custom_req)
-        if custom_req_path.exists():
-            try:
-                subprocess.run(
-                    [str(python_bin), "-m", "pip", "install", "-r", str(custom_req_path)],
-                    check=True,
-                    capture_output=True,
-                    text=True,
-                    timeout=900  # 15 min timeout for large installs
-                )
-            except subprocess.CalledProcessError as e:
-                import shutil
-                shutil.rmtree(venv_path)
-                raise HTTPException(status_code=500, detail=f"Failed to install requirements: {e.stderr}")
-            except subprocess.TimeoutExpired:
-                import shutil
-                shutil.rmtree(venv_path)
-                raise HTTPException(status_code=500, detail="Installation timed out (>15 min)")
-
-    # Create database entry
-    new_venv = VirtualEnvironment(
-        name=config["name"],
-        path=str(venv_path),
-        python_version=python_version,
-        github_repo=config.get("github_repo"),
-        description=config["description"]
-    )
-    db.add(new_venv)
-    db.commit()
-    db.refresh(new_venv)
-
-    # Apply Axis patch if needed
-    patch_result = None
-    if config.get("apply_axis_patch"):
-        patch_result = apply_axis_patch(str(venv_path))
+    thread.start()
 
     return {
-        "message": f"Preset '{preset_name}' created successfully",
-        "venv_id": new_venv.id,
-        "python_used": python_exec,
-        "patch_applied": patch_result
+        "message": f"Setup started for '{preset_name}'",
+        "status": "starting",
+        "log_file": str(log_file)
     }
+
+
+@router.get("/presets/setup/{preset_name}/status")
+async def get_setup_status(preset_name: str):
+    """Get the current status of a preset setup"""
+    if preset_name not in setup_status:
+        return {"status": "not_started"}
+
+    status = setup_status[preset_name].copy()
+
+    # Read last few lines of log if available
+    log_file = status.get("log_file")
+    if log_file and Path(log_file).exists():
+        try:
+            with open(log_file, "r") as f:
+                lines = f.readlines()
+                status["recent_logs"] = [l.strip() for l in lines[-20:]]
+        except:
+            pass
+
+    return status
+
+
+@router.get("/presets/setup/{preset_name}/log")
+async def get_setup_log(preset_name: str):
+    """Get the full setup log for a preset"""
+    if preset_name not in setup_status:
+        raise HTTPException(status_code=404, detail="No setup found for this preset")
+
+    log_file = setup_status[preset_name].get("log_file")
+    if not log_file or not Path(log_file).exists():
+        raise HTTPException(status_code=404, detail="Log file not found")
+
+    with open(log_file, "r") as f:
+        return {"log": f.read()}
+
+
+@router.delete("/presets/setup/{preset_name}")
+async def cancel_setup(preset_name: str):
+    """Cancel a running setup and cleanup"""
+    import shutil
+
+    if preset_name in setup_status:
+        setup_status[preset_name]["status"] = "cancelled"
+
+    # Remove partial venv directory
+    if preset_name in PRESET_VENVS:
+        venv_path = VENV_PATH / PRESET_VENVS[preset_name]["name"]
+        if venv_path.exists():
+            shutil.rmtree(venv_path)
+
+    # Clear status
+    if preset_name in setup_status:
+        del setup_status[preset_name]
+
+    return {"message": f"Setup for '{preset_name}' cancelled and cleaned up"}
