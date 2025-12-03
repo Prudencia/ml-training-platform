@@ -3,7 +3,7 @@ import { useDropzone } from 'react-dropzone'
 import { Link, Globe, Upload, Loader2, FileArchive, X } from 'lucide-react'
 import { datasetsAPI } from '../services/api'
 
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000'
+const API_URL = import.meta.env.VITE_API_URL || ''
 
 // Colors for different classes
 const CLASS_COLORS = [
@@ -149,7 +149,7 @@ function Datasets() {
     setShowYamlModal(dataset)
     setYamlLoading(true)
     try {
-      const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000'
+      const API_URL = import.meta.env.VITE_API_URL || ''
       const response = await fetch(`${API_URL}/api/datasets/${dataset.id}/yaml`)
       const data = await response.json()
       setYamlContent(data.content || '# data.yaml\npath: ../datasets/' + dataset.name + '\ntrain: images/train\nval: images/val\nnc: 1\nnames: [\'class1\']')
@@ -163,7 +163,7 @@ function Datasets() {
   const handleSaveYaml = async () => {
     if (!showYamlModal) return
     try {
-      const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000'
+      const API_URL = import.meta.env.VITE_API_URL || ''
       const response = await fetch(`${API_URL}/api/datasets/${showYamlModal.id}/yaml`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },

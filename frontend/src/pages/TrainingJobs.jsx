@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { trainingAPI, venvsAPI, datasetsAPI, workflowsAPI } from '../services/api'
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts'
 
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000'
+const API_URL = import.meta.env.VITE_API_URL || ''
 
 function TrainingJobs() {
   const navigate = useNavigate()
@@ -330,7 +330,7 @@ function TrainingJobs() {
       // Poll for export status and logs
       const pollLogs = async () => {
         try {
-          const response = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:8000'}/api/workflows/exports/${exportId}/logs`)
+          const response = await fetch(`${API_URL}/api/workflows/exports/${exportId}/logs`)
           if (response.ok) {
             const data = await response.json()
             setExportLogs(data.logs || 'Waiting for logs...')
@@ -381,7 +381,7 @@ function TrainingJobs() {
     // Start polling for export logs
     const logInterval = setInterval(async () => {
       try {
-        const response = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:8000'}/api/workflows/export-logs/${jobToExport.id}`)
+        const response = await fetch(`${API_URL}/api/workflows/export-logs/${jobToExport.id}`)
         if (response.ok) {
           const data = await response.json()
           setExportLogs(data.logs || 'No logs yet...')
@@ -402,7 +402,7 @@ function TrainingJobs() {
       clearInterval(logInterval)
       // Fetch final logs
       try {
-        const finalResponse = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:8000'}/api/workflows/export-logs/${jobToExport.id}`)
+        const finalResponse = await fetch(`${API_URL}/api/workflows/export-logs/${jobToExport.id}`)
         if (finalResponse.ok) {
           const data = await finalResponse.json()
           setExportLogs(data.logs + '\n\n✅ Export completed successfully!\nOutput: ' + res.data.model_output_path)
@@ -416,7 +416,7 @@ function TrainingJobs() {
       console.error('Failed to export model:', error)
       // Fetch final logs with error
       try {
-        const finalResponse = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:8000'}/api/workflows/export-logs/${jobToExport.id}`)
+        const finalResponse = await fetch(`${API_URL}/api/workflows/export-logs/${jobToExport.id}`)
         if (finalResponse.ok) {
           const data = await finalResponse.json()
           setExportLogs(data.logs + '\n\n❌ Export failed: ' + (error.response?.data?.detail || error.message))

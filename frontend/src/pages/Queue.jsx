@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react'
 import { venvsAPI, datasetsAPI } from '../services/api'
 
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000'
+const API_URL = import.meta.env.VITE_API_URL || ''
 
 function Queue() {
   const [queue, setQueue] = useState({ running: null, queued: [], queue_length: 0 })
