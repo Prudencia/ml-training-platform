@@ -1,6 +1,31 @@
+# Dependencies and build output
 node_modules
 dist
+build
+
+# Environment files (IMPORTANT: prevents localhost URLs from being baked in)
 .env
 .env.*
+.env.local
+.env.development
+.env.production
+
+# Git
 .git
+.gitignore
+
+# IDE
+.idea
+.vscode
+*.swp
+*.swo
+
+# Logs and temp
 *.log
+npm-debug.log*
+.npm
+.cache
+
+# Test
+coverage
+.nyc_output

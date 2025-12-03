@@ -12,11 +12,11 @@ RUN npm ci
 # Copy source code
 COPY . .
 
-# Build argument for API URL
-ARG VITE_API_URL=http://localhost:8000
-ENV VITE_API_URL=$VITE_API_URL
+# Remove any .env files that might have been copied (safety measure)
+RUN rm -f .env .env.* 2>/dev/null || true
 
-# Build the application
+# Build the application with empty VITE_API_URL (uses relative URLs via nginx proxy)
+ENV VITE_API_URL=""
 RUN npm run build
 
 # Production stage
