@@ -28,8 +28,8 @@ services:
     build:
       context: ./frontend
       dockerfile: Dockerfile
-      args:
-        - VITE_API_URL=http://localhost:8081
+      # No VITE_API_URL needed - nginx proxies /api/* to backend container
+      # This allows the platform to work from any hostname
     ports:
       - "3080:80"
     depends_on:

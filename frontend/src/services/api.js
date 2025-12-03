@@ -1,6 +1,7 @@
 import axios from 'axios'
 
-const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000'
+// Use empty string for relative URLs (nginx proxies /api/* to backend)
+const API_BASE_URL = import.meta.env.VITE_API_URL || ''
 
 const api = axios.create({
   baseURL: API_BASE_URL,
@@ -59,9 +60,12 @@ export const trainingAPI = {
   getLogs: (id, lines = 100) => api.get(`/api/training/${id}/logs`, { params: { lines } }),
   delete: (id) => api.delete(`/api/training/${id}`),
   streamLogs: (id) => {
-    const apiHost = API_BASE_URL.replace('http://', '').replace('https://', '')
-    const wsUrl = `ws://${apiHost}/api/training/${id}/stream`
-    return new WebSocket(wsUrl)
+    // Use current window location for WebSocket when using relative URLs
+    const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
+    const wsHost = API_BASE_URL ?
+      API_BASE_URL.replace('http://', '').replace('https://', '') :
+      window.location.host
+    return new WebSocket(`${wsProtocol}//${wsHost}/api/training/${id}/stream`)
   }
 }
 
@@ -109,7 +113,7 @@ export const detectxAPI = {
   listBuilds: () => api.get('/api/workflows/detectx/builds'),
   getBuild: (id) => api.get(`/api/workflows/detectx/builds/${id}`),
   getBuildLogs: (id) => api.get(`/api/workflows/detectx/builds/${id}/logs`),
-  downloadBuild: (id) => `${API_BASE_URL}/api/workflows/detectx/builds/${id}/download`,
+  downloadBuild: (id) => `/api/workflows/detectx/builds/${id}/download`,
   deleteBuild: (id) => api.delete(`/api/workflows/detectx/builds/${id}`),
 }
 
@@ -145,10 +149,10 @@ export const annotationsAPI = {
     timeout: 600000  // 10 minutes for large datasets
   }),
   getImageUrl: (projectId, imageId, maxSize = null) => {
-    const base = `${API_BASE_URL}/api/annotations/projects/${projectId}/images/${imageId}/file`
+    const base = `/api/annotations/projects/${projectId}/images/${imageId}/file`
     return maxSize ? `${base}?max_size=${maxSize}` : base
   },
-  getThumbnailUrl: (projectId, imageId) => `${API_BASE_URL}/api/annotations/projects/${projectId}/images/${imageId}/thumbnail`,
+  getThumbnailUrl: (projectId, imageId) => `/api/annotations/projects/${projectId}/images/${imageId}/thumbnail`,
   deleteImage: (projectId, imageId) => api.delete(`/api/annotations/projects/${projectId}/images/${imageId}`),
   getNextUnannotated: (projectId) => api.get(`/api/annotations/projects/${projectId}/next-unannotated`),
 

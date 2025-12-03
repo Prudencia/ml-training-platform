@@ -130,15 +130,12 @@ function Terminal() {
       xtermRef.current.clear()
       xtermRef.current.writeln('\x1b[1;36mConnecting to terminal...\x1b[0m')
 
-      // Determine WebSocket URL from API base URL
-      const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:8000'
-      const apiUrlObj = new URL(apiUrl)
-      const wsProtocol = apiUrlObj.protocol === 'https:' ? 'wss:' : 'ws:'
-      const wsHost = apiUrlObj.hostname
-      const wsPort = apiUrlObj.port || (apiUrlObj.protocol === 'https:' ? '443' : '80')
+      // Determine WebSocket URL - use current window location for relative URLs
+      const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
+      const wsHost = window.location.host
       const wsUrl = selectedVenv
-        ? `${wsProtocol}//${wsHost}:${wsPort}/api/terminal/ws?venv_id=${selectedVenv}`
-        : `${wsProtocol}//${wsHost}:${wsPort}/api/terminal/ws`
+        ? `${wsProtocol}//${wsHost}/api/terminal/ws?venv_id=${selectedVenv}`
+        : `${wsProtocol}//${wsHost}/api/terminal/ws`
 
       // Create WebSocket connection
       const ws = new WebSocket(wsUrl)
