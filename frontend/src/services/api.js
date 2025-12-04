@@ -243,6 +243,25 @@ export const autolabelAPI = {
     api.post(`/api/autolabel/jobs/${jobId}/apply-class-mapping`, { mappings }),
 }
 
+// VLM Management API
+export const vlmAPI = {
+  // Ollama management
+  getOllamaStatus: () => api.get('/api/vlm/ollama/status'),
+  listOllamaModels: () => api.get('/api/vlm/ollama/models'),
+  listAvailableModels: () => api.get('/api/vlm/ollama/available'),
+  pullModel: (modelName) => api.post('/api/vlm/ollama/pull', { model_name: modelName }),
+  getPullStatus: (modelName) => api.get(`/api/vlm/ollama/pull/${modelName}/status`),
+  deleteModel: (modelName) => api.delete(`/api/vlm/ollama/models/${modelName}`),
+  updateOllamaEndpoint: (endpoint, model) => api.put('/api/vlm/ollama/endpoint', { endpoint, model }),
+
+  // Provider management
+  getProvidersStatus: () => api.get('/api/vlm/providers/status'),
+  updateAnthropicKey: (apiKey) => api.put('/api/vlm/providers/anthropic/key', { api_key: apiKey }),
+  updateOpenAIKey: (apiKey) => api.put('/api/vlm/providers/openai/key', { api_key: apiKey }),
+  deleteProviderKey: (provider) => api.delete(`/api/vlm/providers/${provider}/key`),
+  testProvider: (provider) => api.post(`/api/vlm/providers/${provider}/test`),
+}
+
 // Settings & Auth API
 export const settingsAPI = {
   // Settings

@@ -17,7 +17,8 @@ from api import (
     terminal,
     annotations,
     autolabel,
-    settings
+    settings,
+    vlm_management
 )
 from database import init_db
 
@@ -69,6 +70,7 @@ app.include_router(terminal.router, prefix="/api/terminal", tags=["terminal"])
 app.include_router(annotations.router, prefix="/api/annotations", tags=["annotations"])
 app.include_router(autolabel.router, prefix="/api/autolabel", tags=["autolabel"])
 app.include_router(settings.router, prefix="/api/settings", tags=["settings"])
+app.include_router(vlm_management.router, prefix="/api/vlm", tags=["vlm"])
 
 # Serve static files from frontend build
 frontend_dist = Path(__file__).parent.parent / "frontend" / "dist"

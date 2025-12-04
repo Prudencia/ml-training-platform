@@ -1,6 +1,6 @@
 import React, { useState } from 'react'
 import { BrowserRouter as Router, Routes, Route, Link, useLocation } from 'react-router-dom'
-import { LayoutDashboard, Camera, Dumbbell, ListOrdered, Download, Database, Package, Settings, Terminal as TerminalIcon, Box, PenTool, Coffee } from 'lucide-react'
+import { LayoutDashboard, Camera, Dumbbell, ListOrdered, Download, Database, Package, Settings, Terminal as TerminalIcon, Box, PenTool, Coffee, Brain } from 'lucide-react'
 import Dashboard from './pages/Dashboard'
 import TrainingJobs from './pages/TrainingJobs'
 import Datasets from './pages/Datasets'
@@ -14,6 +14,7 @@ import Queue from './pages/Queue'
 import Terminal from './pages/Terminal'
 import Annotate from './pages/Annotate'
 import AnnotateProject from './pages/AnnotateProject'
+import VLM from './pages/VLM'
 import Support from './pages/Support'
 
 const navLinks = [
@@ -26,6 +27,7 @@ const navLinks = [
   { to: '/datasets', icon: Database, label: 'Datasets', className: 'text-orange-600 hover:text-orange-800', borderColor: 'border-orange-600' },
   { to: '/annotate', icon: PenTool, label: 'Annotate', className: 'text-emerald-600 hover:text-emerald-800', borderColor: 'border-emerald-600' },
   { to: '/venvs', icon: Package, label: 'Virtual Envs', className: 'text-cyan-600 hover:text-cyan-800', borderColor: 'border-cyan-600' },
+  { to: '/vlm', icon: Brain, label: 'VLM', className: 'text-violet-600 hover:text-violet-800', borderColor: 'border-violet-600' },
   { to: '/presets', icon: Settings, label: 'Presets', className: 'text-pink-600 hover:text-pink-800', borderColor: 'border-pink-600' },
   { to: '/terminal', icon: TerminalIcon, label: 'Terminal', className: 'text-red-600 hover:text-red-800', borderColor: 'border-red-600' },
 ]
@@ -147,6 +149,7 @@ function App() {
             <Route path="/annotate" element={<Annotate />} />
             <Route path="/annotate/:projectId" element={<AnnotateProject />} />
             <Route path="/venvs" element={<VirtualEnvs />} />
+            <Route path="/vlm" element={<VLM />} />
             <Route path="/yaml" element={<YAMLEditor />} />
             <Route path="/presets" element={<Presets />} />
             <Route path="/terminal" element={<Terminal />} />

@@ -314,6 +314,44 @@ def init_db():
     os.makedirs("database", exist_ok=True)
     Base.metadata.create_all(bind=engine)
 
+    # Run migrations for existing databases
+    _run_migrations()
+
+
+def _run_migrations():
+    """Run database migrations for schema updates"""
+    from sqlalchemy import text
+
+    with engine.connect() as conn:
+        # Check if auto_label_jobs table exists and add VLM columns if missing
+        try:
+            # Get existing columns
+            result = conn.execute(text("PRAGMA table_info(auto_label_jobs)"))
+            existing_columns = {row[1] for row in result.fetchall()}
+
+            # VLM columns to add
+            vlm_columns = [
+                ("model_type", "VARCHAR DEFAULT 'yolo'"),
+                ("vlm_provider", "VARCHAR"),
+                ("vlm_classes", "TEXT"),  # JSON stored as text
+                ("vlm_prompt", "TEXT"),
+                ("estimated_cost", "FLOAT DEFAULT 0.0"),
+                ("actual_cost", "FLOAT DEFAULT 0.0"),
+            ]
+
+            for col_name, col_type in vlm_columns:
+                if col_name not in existing_columns:
+                    try:
+                        conn.execute(text(f"ALTER TABLE auto_label_jobs ADD COLUMN {col_name} {col_type}"))
+                        conn.commit()
+                        print(f"Added column {col_name} to auto_label_jobs")
+                    except Exception as e:
+                        print(f"Could not add column {col_name}: {e}")
+        except Exception as e:
+            # Table doesn't exist yet, will be created by create_all
+            print(f"Migration check skipped: {e}")
+
+
 def get_db():
     """Dependency for getting database session"""
     db = SessionLocal()
