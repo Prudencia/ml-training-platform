@@ -14,7 +14,7 @@ function VLM() {
   const [installedModels, setInstalledModels] = useState([])
   const [availableModels, setAvailableModels] = useState([])
   const [pullingModels, setPullingModels] = useState({}) // model -> progress
-  const [ollamaEndpoint, setOllamaEndpoint] = useState('http://localhost:11434')
+  const [ollamaEndpoint, setOllamaEndpoint] = useState('http://host.docker.internal:11434')
 
   // Cloud providers state
   const [providers, setProviders] = useState([])

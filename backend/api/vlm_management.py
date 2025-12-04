@@ -87,7 +87,9 @@ def delete_setting(db: Session, key: str):
 async def get_ollama_endpoint(db: Session) -> str:
     """Get configured Ollama endpoint"""
     endpoint = get_setting(db, "vlm_ollama_endpoint")
-    return endpoint or "http://localhost:11434"
+    # Default to host.docker.internal for Docker environments
+    # This allows the container to reach Ollama running on the host machine
+    return endpoint or "http://host.docker.internal:11434"
 
 
 # ============ Ollama Management Endpoints ============
