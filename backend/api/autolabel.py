@@ -1245,6 +1245,7 @@ class VLMJobCreate(BaseModel):
     """Request model for creating a VLM auto-labeling job"""
     project_id: int
     provider: str  # "anthropic", "openai", "ollama"
+    model: Optional[str] = None  # Specific model to use (e.g., "llava:7b" for Ollama)
     classes: List[str]  # Classes to detect
     confidence_threshold: float = 0.5
     batch_size: int = 10  # Smaller batches for API rate limits
@@ -1423,13 +1424,18 @@ async def create_vlm_job(
     # Estimate cost
     estimated_cost = provider.get_cost_estimate(image_count)
 
+    # Determine model name for display
+    model_display = job_data.model or settings.get("vlm_ollama_model", "llava:13b") if job_data.provider == "ollama" else job_data.model
+    print(f"Creating VLM job: provider={job_data.provider}, model={job_data.model}, model_display={model_display}, classes={job_data.classes}")
+
     # Create job record
     job = AutoLabelJob(
         project_id=job_data.project_id,
         model_path="",  # Not used for VLM
-        model_name=f"VLM: {job_data.provider}",
+        model_name=f"VLM: {model_display or job_data.provider}",
         model_type="vlm",
         vlm_provider=job_data.provider,
+        vlm_model=job_data.model,  # Store the specific model
         vlm_classes=job_data.classes,
         vlm_prompt=job_data.custom_prompt,
         confidence_threshold=job_data.confidence_threshold,
@@ -1453,6 +1459,7 @@ async def create_vlm_job(
         "total_images": image_count,
         "estimated_cost": estimated_cost,
         "provider": job_data.provider,
+        "model": model_display or job_data.provider,
         "classes": job_data.classes,
         "message": "VLM auto-labeling job started"
     }
@@ -1475,10 +1482,12 @@ def run_vlm_autolabel_job(job_id: int):
             job.started_at = datetime.utcnow()
         db.commit()
 
-        # Get provider
+        # Get provider with specific model from job
         settings = _get_vlm_settings(db)
-        provider = get_vlm_provider(job.vlm_provider, settings)
+        provider = get_vlm_provider(job.vlm_provider, settings, model_override=job.vlm_model)
         classes = job.vlm_classes or []
+
+        print(f"VLM Job {job_id}: Using provider={job.vlm_provider}, model={job.vlm_model or 'default'}, classes={classes}")
 
         # Get images
         if job.only_unannotated:
@@ -1514,9 +1523,12 @@ def run_vlm_autolabel_job(job_id: int):
                         continue
 
                     # Run VLM inference with retry
+                    print(f"VLM Job {job_id}: Processing image {idx+1}/{len(images)}: {image_path}")
                     response = loop.run_until_complete(
                         detect_with_retry(provider, image_path, classes, job.vlm_prompt)
                     )
+
+                    print(f"VLM Job {job_id}: Response for image {image.id} - error={response.error}, bboxes={len(response.bboxes)}, raw_len={len(response.raw_response)}")
 
                     if response.error:
                         print(f"VLM error on image {image.id}: {response.error}")

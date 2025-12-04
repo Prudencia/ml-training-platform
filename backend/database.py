@@ -73,6 +73,7 @@ class AutoLabelJob(Base):
     # VLM-specific fields
     model_type = Column(String, default="yolo")  # "yolo" or "vlm"
     vlm_provider = Column(String, nullable=True)  # "anthropic", "openai", "ollama"
+    vlm_model = Column(String, nullable=True)  # Specific model name (e.g., "llava:7b", "gpt-4o")
     vlm_classes = Column(JSON, nullable=True)  # Classes to detect: ["person", "car", ...]
     vlm_prompt = Column(Text, nullable=True)  # Custom prompt override
     estimated_cost = Column(Float, default=0.0)  # Estimated API cost (for cloud VLMs)
@@ -333,6 +334,7 @@ def _run_migrations():
             vlm_columns = [
                 ("model_type", "VARCHAR DEFAULT 'yolo'"),
                 ("vlm_provider", "VARCHAR"),
+                ("vlm_model", "VARCHAR"),
                 ("vlm_classes", "TEXT"),  # JSON stored as text
                 ("vlm_prompt", "TEXT"),
                 ("estimated_cost", "FLOAT DEFAULT 0.0"),

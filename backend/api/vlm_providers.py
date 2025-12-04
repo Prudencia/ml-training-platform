@@ -577,13 +577,14 @@ class NVIDIANIMProvider(VLMProvider):
             return False
 
 
-def get_vlm_provider(provider_type: str, settings: Dict[str, Any]) -> VLMProvider:
+def get_vlm_provider(provider_type: str, settings: Dict[str, Any], model_override: Optional[str] = None) -> VLMProvider:
     """
     Factory function to get appropriate VLM provider.
 
     Args:
         provider_type: One of "anthropic", "openai", "ollama", "nvidia"
         settings: Dict containing API keys and endpoints
+        model_override: Optional specific model to use (overrides settings)
 
     Returns:
         Configured VLMProvider instance
@@ -592,28 +593,28 @@ def get_vlm_provider(provider_type: str, settings: Dict[str, Any]) -> VLMProvide
         api_key = settings.get("vlm_anthropic_api_key")
         if not api_key:
             raise ValueError("Anthropic API key not configured. Set it in Settings.")
-        model = settings.get("vlm_anthropic_model", "claude-sonnet-4-20250514")
+        model = model_override or settings.get("vlm_anthropic_model", "claude-sonnet-4-20250514")
         return AnthropicProvider(api_key=api_key, model=model)
 
     elif provider_type == "openai" or provider_type == "gpt4v":
         api_key = settings.get("vlm_openai_api_key")
         if not api_key:
             raise ValueError("OpenAI API key not configured. Set it in Settings.")
-        model = settings.get("vlm_openai_model", "gpt-4o")
+        model = model_override or settings.get("vlm_openai_model", "gpt-4o")
         return OpenAIProvider(api_key=api_key, model=model)
 
     elif provider_type == "nvidia" or provider_type == "nim":
         api_key = settings.get("vlm_nvidia_api_key")
         if not api_key:
             raise ValueError("NVIDIA API key not configured. Get one at https://build.nvidia.com/")
-        model = settings.get("vlm_nvidia_model", "microsoft/phi-3.5-vision-instruct")
+        model = model_override or settings.get("vlm_nvidia_model", "microsoft/phi-3.5-vision-instruct")
         return NVIDIANIMProvider(api_key=api_key, model=model)
 
     elif provider_type == "ollama":
         import os
         default_endpoint = os.environ.get("OLLAMA_HOST", "http://host.docker.internal:11434")
         endpoint = settings.get("vlm_ollama_endpoint", default_endpoint)
-        model = settings.get("vlm_ollama_model", "llava:13b")
+        model = model_override or settings.get("vlm_ollama_model", "llava:13b")
         return OllamaProvider(endpoint=endpoint, model=model)
 
     else:
