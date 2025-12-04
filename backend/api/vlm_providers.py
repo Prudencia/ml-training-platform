@@ -81,20 +81,39 @@ class VLMProvider(ABC):
 
     def _build_system_prompt(self, classes: List[str]) -> str:
         """Build system prompt for object detection"""
-        return f"""You are an object detector. Find objects in images and return their locations as JSON.
+        return f"""You are a precise object detection system. Your task is to locate objects and output exact bounding box coordinates.
 
-Classes to find: {', '.join(classes)}
+IMPORTANT INSTRUCTIONS:
+1. Carefully examine the ENTIRE image
+2. For each object found, estimate its TIGHT bounding box
+3. Coordinates are percentages (0-100) of image dimensions:
+   - left: distance from LEFT edge to LEFT side of object
+   - top: distance from TOP edge to TOP of object
+   - right: distance from LEFT edge to RIGHT side of object
+   - bottom: distance from TOP edge to BOTTOM of object
 
-Return a JSON array like this:
-[{{"class": "person", "bbox": [10, 20, 45, 80], "confidence": 0.9}}]
+Example: An object in the center-right of the image might have bbox [50, 30, 80, 70]
 
-bbox = [left%, top%, right%, bottom%] where values are 0-100 representing percentage of image size.
+Classes to detect: {', '.join(classes)}
 
-Return ONLY the JSON array, nothing else. If no objects found, return: []"""
+OUTPUT FORMAT - Return ONLY a valid JSON array:
+[{{"class": "classname", "bbox": [left, top, right, bottom], "confidence": 0.95}}]
+
+If no objects found, return exactly: []
+Do NOT include any text before or after the JSON array."""
 
     def _build_user_prompt(self, classes: List[str]) -> str:
         """Build user prompt for object detection"""
-        return f"Find all {', '.join(classes)} in this image. Return JSON array with class, bbox [left%, top%, right%, bottom%], and confidence for each object found."
+        return f"""Locate all {', '.join(classes)} in this image.
+
+For EACH object found:
+1. Identify its exact position
+2. Draw a tight box around it (not too big, not too small)
+3. Express coordinates as percentages (0-100) of image size
+
+Return JSON array: [{{"class": "name", "bbox": [left%, top%, right%, bottom%], "confidence": 0.0-1.0}}]
+
+Be precise with the bounding box - it should tightly wrap the object."""
 
     def _parse_response(self, response_text: str, classes: List[str]) -> List[BoundingBox]:
         """Parse VLM response text into bounding boxes"""
@@ -145,14 +164,26 @@ Return ONLY the JSON array, nothing else. If no objects found, return: []"""
             try:
                 confidence = float(det.get("confidence", 0.5))
 
-                # Convert from [x_min, y_min, x_max, y_max] percentages to YOLO format
-                x_min, y_min, x_max, y_max = [float(b) / 100.0 for b in bbox]
+                # Convert from [x_min, y_min, x_max, y_max] to YOLO format
+                # Handle both 0-1 range and 0-100 range (percentage)
+                raw_values = [float(b) for b in bbox]
+                print(f"  Raw bbox: {raw_values}")
+
+                # If any value > 1, assume percentages (0-100), otherwise assume 0-1 range
+                if any(v > 1.0 for v in raw_values):
+                    x_min, y_min, x_max, y_max = [v / 100.0 for v in raw_values]
+                    print(f"  Converted from 0-100 range")
+                else:
+                    x_min, y_min, x_max, y_max = raw_values
+                    print(f"  Using 0-1 range as-is")
 
                 # Calculate center and dimensions
                 x_center = (x_min + x_max) / 2
                 y_center = (y_min + y_max) / 2
                 width = x_max - x_min
                 height = y_max - y_min
+
+                print(f"  YOLO format: center=({x_center:.3f}, {y_center:.3f}), size=({width:.3f}, {height:.3f})")
 
                 # Clamp values to 0-1
                 x_center = max(0, min(1, x_center))
