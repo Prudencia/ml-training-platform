@@ -433,8 +433,10 @@ async def delete_ollama_model(model_name: str, db: Session = Depends(get_db)):
     endpoint = await get_ollama_endpoint(db)
 
     try:
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            response = await client.delete(
+        async with httpx.AsyncClient(timeout=60.0) as client:
+            # Ollama uses DELETE with request body, need to use request() method
+            response = await client.request(
+                "DELETE",
                 f"{endpoint}/api/delete",
                 json={"name": model_name}
             )
