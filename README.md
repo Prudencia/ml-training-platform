@@ -14,11 +14,23 @@ A comprehensive web-based platform for managing machine learning training workfl
   - Import images from datasets or upload directly
   - Auto-split generation (train/val/test)
   - Export to YOLO-format datasets
-- **Auto-Labeling**: Run inference with pre-trained models for automatic annotation
+- **Auto-Labeling**: Run inference with pre-trained models or VLMs for automatic annotation
   - Upload custom YOLOv5 models or use pre-trained weights
+  - **VLM (Vision Language Model) Support**: Use AI vision models for intelligent auto-labeling
   - Confidence threshold filtering
   - Review, approve, or reject predictions
   - Bulk class remapping for model class alignment
+
+### VLM (Vision Language Models)
+- **Local Models via Ollama**: Run vision models locally for free
+  - LLaVA (7B, 13B, 34B), LLaMA 3.2 Vision, Moondream, MiniCPM-V, and more
+  - One-click model installation from VLM page
+  - Custom model support - pull any Ollama vision model
+- **Cloud Providers**: Use cloud APIs for higher accuracy
+  - **NVIDIA NIM**: 1000 free credits for new users (Phi-3.5 Vision, VILA, LLaMA Vision)
+  - **Anthropic Claude**: Claude Sonnet for vision tasks
+  - **OpenAI GPT-4 Vision**: GPT-4o for vision tasks
+- **VLM Management Page**: Configure providers, install models, test connections
 - **Class Management**:
   - Add, edit, rename classes with custom colors
   - Delete classes and all associated annotations
@@ -77,6 +89,8 @@ ml-training-platform/
 │   └── api/
 │       ├── annotations.py      # Annotation projects, images, labels
 │       ├── autolabel.py        # Auto-labeling with pretrained models
+│       ├── vlm_management.py   # VLM provider management (Ollama, cloud APIs)
+│       ├── vlm_providers.py    # VLM provider implementations
 │       ├── datasets.py         # Dataset upload, browse, preview
 │       ├── training.py         # Training job control
 │       ├── venv.py             # Virtual environment management + presets
@@ -101,6 +115,7 @@ ml-training-platform/
 │   │       ├── Presets.jsx         # Training presets
 │   │       ├── Queue.jsx           # Training queue
 │   │       ├── Exports.jsx         # Model exports
+│   │       ├── VLM.jsx             # VLM management page
 │   │       ├── AxisYOLOv5.jsx      # Axis workflow
 │   │       ├── DetectXBuild.jsx    # ACAP builder
 │   │       ├── Terminal.jsx        # Web terminal
@@ -267,6 +282,7 @@ The platform requires two specialized virtual environments for the Axis workflow
 | `/api/datasets/` | Dataset CRUD, browse, preview |
 | `/api/annotations/` | Annotation projects, images, labels, class management |
 | `/api/autolabel/` | Auto-labeling jobs, predictions, model management |
+| `/api/vlm/` | VLM provider management, Ollama models, cloud API keys |
 | `/api/training/` | Training job control, logs |
 | `/api/venv/` | Virtual environment management, presets |
 | `/api/presets/` | Training presets |
@@ -307,6 +323,22 @@ services:
     ports:
       - "YOUR_FRONTEND_PORT:80"
 ```
+
+### Ollama (VLM Support)
+
+The docker-compose includes an **Ollama service** for running local vision language models. This enables free, local auto-labeling with models like LLaVA, LLaMA 3.2 Vision, and more.
+
+**Included by default:**
+- Ollama runs as a Docker service with GPU support
+- Backend connects to `http://ollama:11434` automatically
+- Model data persisted in `ollama_data` volume
+
+**To pull a vision model:**
+1. Go to the VLM page in the web UI
+2. Click "Pull" on any available model (e.g., LLaVA 7B)
+3. Or use the custom model input to pull any Ollama model
+
+**Cloud providers** (NVIDIA NIM, Anthropic, OpenAI) can also be configured in the VLM page with API keys.
 
 ### GPU Support in Docker
 
