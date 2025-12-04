@@ -1,6 +1,21 @@
 version: '3.8'
 
 services:
+  ollama:
+    image: ollama/ollama:latest
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_data:/root/.ollama
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    restart: unless-stopped
+
   backend:
     build:
       context: ./backend
@@ -12,9 +27,9 @@ services:
       - ./backend/database:/app/database
     environment:
       - PYTHONUNBUFFERED=1
-      - OLLAMA_HOST=http://host.docker.internal:11434
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
+      - OLLAMA_HOST=http://ollama:11434
+    depends_on:
+      - ollama
     shm_size: '8gb'  # Increase shared memory for PyTorch DataLoader workers
     restart: unless-stopped
     # GPU support enabled by default (requires nvidia-container-toolkit)
@@ -42,3 +57,4 @@ services:
 volumes:
   storage:
   database:
+  ollama_data:
