@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react'
 import { useDropzone } from 'react-dropzone'
-import { Link, Globe, Upload, Loader2, FileArchive, X } from 'lucide-react'
+import { Link, Globe, Upload, Loader2, FileArchive, X, Download } from 'lucide-react'
 import { datasetsAPI } from '../services/api'
 
 const API_URL = import.meta.env.VITE_API_URL || ''
@@ -142,6 +142,22 @@ function Datasets() {
       loadDatasets()
     } catch (error) {
       console.error('Failed to analyze dataset:', error)
+    }
+  }
+
+  const handleDownload = async (dataset) => {
+    try {
+      // Trigger download via browser
+      const downloadUrl = `${API_URL}/api/datasets/${dataset.id}/download`
+      const link = document.createElement('a')
+      link.href = downloadUrl
+      link.download = `${dataset.name}.zip`
+      document.body.appendChild(link)
+      link.click()
+      document.body.removeChild(link)
+    } catch (error) {
+      console.error('Failed to download dataset:', error)
+      alert('Failed to download dataset')
     }
   }
 
@@ -390,6 +406,13 @@ function Datasets() {
                 className="flex-1 px-3 py-2 bg-green-100 text-green-700 rounded hover:bg-green-200 text-sm"
               >
                 Analyze
+              </button>
+              <button
+                onClick={() => handleDownload(dataset)}
+                className="px-3 py-2 bg-purple-100 text-purple-700 rounded hover:bg-purple-200 text-sm flex items-center gap-1"
+              >
+                <Download size={14} />
+                Download
               </button>
               <button
                 onClick={() => handleDelete(dataset.id)}

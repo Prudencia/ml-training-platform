@@ -355,6 +355,58 @@ async def delete_dataset(dataset_id: int, db: Session = Depends(get_db)):
 
     return {"message": "Dataset deleted successfully"}
 
+
+@router.get("/{dataset_id}/download")
+async def download_dataset(dataset_id: int, db: Session = Depends(get_db)):
+    """Download a dataset as a zip file"""
+    from fastapi.responses import StreamingResponse
+    import zipfile
+    import io
+    import tempfile
+
+    dataset = db.query(Dataset).filter(Dataset.id == dataset_id).first()
+    if not dataset:
+        raise HTTPException(status_code=404, detail="Dataset not found")
+
+    dataset_path = Path(dataset.path)
+    if not dataset_path.exists():
+        raise HTTPException(status_code=404, detail="Dataset folder not found")
+
+    # Create zip file in temp location
+    temp_file = tempfile.NamedTemporaryFile(delete=False, suffix='.zip')
+    temp_path = temp_file.name
+    temp_file.close()
+
+    try:
+        with zipfile.ZipFile(temp_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
+            for file_path in dataset_path.rglob('*'):
+                if file_path.is_file():
+                    arcname = file_path.relative_to(dataset_path)
+                    zipf.write(file_path, arcname)
+
+        # Stream the file
+        def iterfile():
+            with open(temp_path, 'rb') as f:
+                while chunk := f.read(8192):
+                    yield chunk
+            # Clean up temp file after streaming
+            os.unlink(temp_path)
+
+        filename = f"{dataset.name}.zip"
+        return StreamingResponse(
+            iterfile(),
+            media_type="application/zip",
+            headers={
+                "Content-Disposition": f'attachment; filename="{filename}"'
+            }
+        )
+    except Exception as e:
+        # Clean up on error
+        if os.path.exists(temp_path):
+            os.unlink(temp_path)
+        raise HTTPException(status_code=500, detail=f"Failed to create zip: {str(e)}")
+
+
 @router.post("/{dataset_id}/analyze")
 async def analyze_dataset(dataset_id: int, db: Session = Depends(get_db)):
     """Analyze dataset structure and count images/classes"""
