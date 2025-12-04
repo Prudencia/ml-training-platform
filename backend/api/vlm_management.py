@@ -14,6 +14,7 @@ from typing import List, Optional
 import httpx
 import asyncio
 import platform
+import os
 from datetime import datetime
 
 from database import get_db, SystemSettings
@@ -491,7 +492,7 @@ async def get_all_providers_status(db: Session = Depends(get_db)):
     providers = []
 
     # Ollama (Local)
-    ollama_endpoint = get_setting(db, "vlm_ollama_endpoint") or "http://localhost:11434"
+    ollama_endpoint = get_setting(db, "vlm_ollama_endpoint") or os.environ.get("OLLAMA_HOST", "http://localhost:11434")
     ollama_model = get_setting(db, "vlm_ollama_model") or "llava:13b"
     ollama_available = False
     ollama_error = None
@@ -676,7 +677,7 @@ async def delete_provider_key(provider: str, db: Session = Depends(get_db)):
 async def test_provider_connection(provider: str, db: Session = Depends(get_db)):
     """Test connection to a VLM provider"""
     if provider == "ollama":
-        endpoint = get_setting(db, "vlm_ollama_endpoint") or "http://localhost:11434"
+        endpoint = get_setting(db, "vlm_ollama_endpoint") or os.environ.get("OLLAMA_HOST", "http://localhost:11434")
         try:
             async with httpx.AsyncClient(timeout=5.0) as client:
                 response = await client.get(f"{endpoint}/api/version")

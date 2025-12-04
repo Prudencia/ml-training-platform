@@ -1269,9 +1269,10 @@ def _get_vlm_settings(db: Session) -> dict:
         if setting:
             settings[key] = setting.value
 
-    # Default values
+    # Default values - use OLLAMA_HOST env var if set (for Docker), otherwise localhost
+    import os
     if "vlm_ollama_endpoint" not in settings:
-        settings["vlm_ollama_endpoint"] = "http://localhost:11434"
+        settings["vlm_ollama_endpoint"] = os.environ.get("OLLAMA_HOST", "http://localhost:11434")
     if "vlm_ollama_model" not in settings:
         settings["vlm_ollama_model"] = "llava:13b"
 

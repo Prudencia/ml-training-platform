@@ -371,7 +371,10 @@ class OpenAIProvider(VLMProvider):
 class OllamaProvider(VLMProvider):
     """Ollama local VLM provider (LLaVA, etc.)"""
 
-    def __init__(self, endpoint: str = "http://host.docker.internal:11434", model: str = "llava:13b"):
+    def __init__(self, endpoint: str = None, model: str = "llava:13b"):
+        import os
+        if endpoint is None:
+            endpoint = os.environ.get("OLLAMA_HOST", "http://localhost:11434")
         self.endpoint = endpoint.rstrip("/")
         self.model = model
 
