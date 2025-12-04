@@ -2,8 +2,9 @@
 VLM Management API - Manage local and cloud VLM providers
 
 Features:
-- Ollama: List/pull/delete models, check service status
+- Ollama: List/pull/delete models, check service status, custom model installation
 - Cloud providers: API key management, connection testing
+- NVIDIA NIM: Cloud API for NVIDIA vision models
 """
 
 from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
@@ -12,6 +13,7 @@ from pydantic import BaseModel
 from typing import List, Optional
 import httpx
 import asyncio
+import platform
 from datetime import datetime
 
 from database import get_db, SystemSettings
@@ -42,6 +44,10 @@ class APIKeyUpdate(BaseModel):
 class OllamaEndpointUpdate(BaseModel):
     endpoint: str
     model: Optional[str] = "llava:13b"
+
+
+class CustomModelPullRequest(BaseModel):
+    model_name: str  # Any valid Ollama model name or HuggingFace model
 
 
 class ProviderStatus(BaseModel):
@@ -163,50 +169,169 @@ async def list_available_ollama_models():
     """List recommended VLM models available to pull"""
     # Curated list of vision-capable models
     available = [
+        # LLaVA family
         {
             "name": "llava:7b",
             "display_name": "LLaVA 7B",
             "description": "Fast, lightweight vision model",
             "size_gb": 4.7,
-            "recommended": True
+            "recommended": True,
+            "category": "llava"
         },
         {
             "name": "llava:13b",
             "display_name": "LLaVA 13B",
             "description": "Balanced performance and quality",
             "size_gb": 8.0,
-            "recommended": True
+            "recommended": True,
+            "category": "llava"
         },
         {
             "name": "llava:34b",
             "display_name": "LLaVA 34B",
             "description": "Highest quality, requires more VRAM",
             "size_gb": 20.0,
-            "recommended": False
-        },
-        {
-            "name": "bakllava",
-            "display_name": "BakLLaVA",
-            "description": "Fine-tuned LLaVA variant",
-            "size_gb": 4.7,
-            "recommended": False
+            "recommended": False,
+            "category": "llava"
         },
         {
             "name": "llava-llama3",
             "display_name": "LLaVA-LLaMA3",
             "description": "LLaVA with LLaMA 3 base",
             "size_gb": 5.5,
-            "recommended": False
+            "recommended": False,
+            "category": "llava"
         },
+        {
+            "name": "bakllava",
+            "display_name": "BakLLaVA",
+            "description": "Fine-tuned LLaVA variant",
+            "size_gb": 4.7,
+            "recommended": False,
+            "category": "llava"
+        },
+        # LLaMA 3.2 Vision (new)
+        {
+            "name": "llama3.2-vision",
+            "display_name": "LLaMA 3.2 Vision 11B",
+            "description": "Meta's latest vision model, excellent accuracy",
+            "size_gb": 7.9,
+            "recommended": True,
+            "category": "llama"
+        },
+        {
+            "name": "llama3.2-vision:90b",
+            "display_name": "LLaMA 3.2 Vision 90B",
+            "description": "Largest Meta vision model, best quality",
+            "size_gb": 55.0,
+            "recommended": False,
+            "category": "llama"
+        },
+        # Efficient models
         {
             "name": "minicpm-v",
             "display_name": "MiniCPM-V",
             "description": "Efficient vision model, good for object detection",
             "size_gb": 5.0,
-            "recommended": True
+            "recommended": True,
+            "category": "efficient"
+        },
+        {
+            "name": "moondream",
+            "display_name": "Moondream 2",
+            "description": "Ultra-lightweight, runs on CPU",
+            "size_gb": 1.7,
+            "recommended": True,
+            "category": "efficient"
+        },
+        # Advanced models
+        {
+            "name": "llava-phi3",
+            "display_name": "LLaVA-Phi3",
+            "description": "LLaVA with Microsoft Phi-3 base",
+            "size_gb": 3.8,
+            "recommended": False,
+            "category": "advanced"
+        },
+        {
+            "name": "cogvlm2",
+            "display_name": "CogVLM2",
+            "description": "Strong OCR and detailed understanding",
+            "size_gb": 17.0,
+            "recommended": False,
+            "category": "advanced"
         }
     ]
     return {"available_models": available}
+
+
+@router.get("/ollama/install-instructions")
+async def get_ollama_install_instructions():
+    """Get installation instructions for Ollama based on platform"""
+    system = platform.system().lower()
+
+    instructions = {
+        "platform": system,
+        "steps": [],
+        "download_url": "https://ollama.ai/download",
+        "docs_url": "https://github.com/ollama/ollama"
+    }
+
+    if system == "linux":
+        instructions["steps"] = [
+            "Run: curl -fsSL https://ollama.ai/install.sh | sh",
+            "Start service: ollama serve",
+            "Or run with systemd: sudo systemctl enable ollama && sudo systemctl start ollama"
+        ]
+        instructions["one_liner"] = "curl -fsSL https://ollama.ai/install.sh | sh"
+    elif system == "darwin":  # macOS
+        instructions["steps"] = [
+            "Download from https://ollama.ai/download",
+            "Or install with Homebrew: brew install ollama",
+            "Run: ollama serve"
+        ]
+        instructions["one_liner"] = "brew install ollama && ollama serve"
+    elif system == "windows":
+        instructions["steps"] = [
+            "Download installer from https://ollama.ai/download",
+            "Run the installer",
+            "Ollama will start automatically"
+        ]
+        instructions["one_liner"] = None
+
+    return instructions
+
+
+@router.post("/ollama/pull-custom")
+async def pull_custom_model(
+    request: CustomModelPullRequest,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db)
+):
+    """Pull any Ollama model by name (including custom/community models)"""
+    model_name = request.model_name.strip()
+
+    if not model_name:
+        raise HTTPException(status_code=400, detail="Model name is required")
+
+    endpoint = await get_ollama_endpoint(db)
+
+    # Check if already pulling this model
+    if model_name in _ollama_pull_tasks and _ollama_pull_tasks[model_name]["status"] == "pulling":
+        return {"status": "already_pulling", "model": model_name}
+
+    # Initialize task tracking
+    _ollama_pull_tasks[model_name] = {
+        "status": "starting",
+        "progress": 0,
+        "error": None,
+        "started_at": datetime.utcnow().isoformat()
+    }
+
+    # Start background pull
+    background_tasks.add_task(_pull_model_task, model_name, endpoint)
+
+    return {"status": "started", "model": model_name}
 
 
 @router.post("/ollama/pull")
@@ -442,6 +567,29 @@ async def get_all_providers_status(db: Session = Depends(get_db)):
         "key_hint": f"...{openai_key[-4:]}" if openai_key else None
     })
 
+    # NVIDIA NIM
+    nvidia_key = get_setting(db, "vlm_nvidia_api_key")
+    nvidia_configured = bool(nvidia_key)
+    nvidia_available = False
+    nvidia_error = None
+
+    if nvidia_configured:
+        nvidia_available = nvidia_key.startswith("nvapi-") and len(nvidia_key) > 20
+
+    providers.append({
+        "name": "nvidia",
+        "display_name": "NVIDIA NIM",
+        "provider_type": "cloud",
+        "is_configured": nvidia_configured,
+        "is_available": nvidia_available,
+        "error": nvidia_error,
+        "models": ["microsoft/phi-3.5-vision-instruct", "nvidia/vila", "meta/llama-3.2-90b-vision-instruct"],
+        "active_model": "microsoft/phi-3.5-vision-instruct",
+        "key_hint": f"...{nvidia_key[-4:]}" if nvidia_key else None,
+        "free_credits": "1000 free credits for new users",
+        "signup_url": "https://build.nvidia.com/"
+    })
+
     return {"providers": providers}
 
 
@@ -488,12 +636,30 @@ async def update_openai_key(request: APIKeyUpdate, db: Session = Depends(get_db)
     }
 
 
+@router.put("/providers/nvidia/key")
+async def update_nvidia_key(request: APIKeyUpdate, db: Session = Depends(get_db)):
+    """Update NVIDIA NIM API key"""
+    set_setting(db, "vlm_nvidia_api_key", request.api_key)
+
+    # Validate key format (NVIDIA keys start with nvapi-)
+    valid = request.api_key.startswith("nvapi-") and len(request.api_key) > 20
+
+    return {
+        "status": "success" if valid else "saved",
+        "provider": "nvidia",
+        "key_hint": f"...{request.api_key[-4:]}",
+        "valid": valid,
+        "warning": None if valid else "Key format may be invalid (should start with nvapi-)"
+    }
+
+
 @router.delete("/providers/{provider}/key")
 async def delete_provider_key(provider: str, db: Session = Depends(get_db)):
     """Delete API key for a cloud provider"""
     key_mapping = {
         "anthropic": "vlm_anthropic_api_key",
-        "openai": "vlm_openai_api_key"
+        "openai": "vlm_openai_api_key",
+        "nvidia": "vlm_nvidia_api_key"
     }
 
     if provider not in key_mapping:
@@ -545,6 +711,28 @@ async def test_provider_connection(provider: str, db: Session = Depends(get_db))
             # Make a minimal API call
             response = client.chat.completions.create(
                 model="gpt-4o",
+                messages=[{"role": "user", "content": "Hi"}],
+                max_tokens=10
+            )
+            return {"status": "success", "provider": provider, "message": "API key valid"}
+        except Exception as e:
+            return {"status": "failed", "provider": provider, "error": str(e)}
+
+    elif provider == "nvidia":
+        api_key = get_setting(db, "vlm_nvidia_api_key")
+        if not api_key:
+            return {"status": "failed", "provider": provider, "error": "API key not configured"}
+
+        try:
+            # NVIDIA NIM uses OpenAI-compatible API
+            from openai import OpenAI
+            client = OpenAI(
+                base_url="https://integrate.api.nvidia.com/v1",
+                api_key=api_key
+            )
+            # Make a minimal API call to test the key
+            response = client.chat.completions.create(
+                model="microsoft/phi-3.5-vision-instruct",
                 messages=[{"role": "user", "content": "Hi"}],
                 max_tokens=10
             )

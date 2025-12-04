@@ -249,7 +249,9 @@ export const vlmAPI = {
   getOllamaStatus: () => api.get('/api/vlm/ollama/status'),
   listOllamaModels: () => api.get('/api/vlm/ollama/models'),
   listAvailableModels: () => api.get('/api/vlm/ollama/available'),
+  getInstallInstructions: () => api.get('/api/vlm/ollama/install-instructions'),
   pullModel: (modelName) => api.post('/api/vlm/ollama/pull', { model_name: modelName }),
+  pullCustomModel: (modelName) => api.post('/api/vlm/ollama/pull-custom', { model_name: modelName }),
   getPullStatus: (modelName) => api.get(`/api/vlm/ollama/pull/${modelName}/status`),
   deleteModel: (modelName) => api.delete(`/api/vlm/ollama/models/${modelName}`),
   updateOllamaEndpoint: (endpoint, model) => api.put('/api/vlm/ollama/endpoint', { endpoint, model }),
@@ -258,6 +260,7 @@ export const vlmAPI = {
   getProvidersStatus: () => api.get('/api/vlm/providers/status'),
   updateAnthropicKey: (apiKey) => api.put('/api/vlm/providers/anthropic/key', { api_key: apiKey }),
   updateOpenAIKey: (apiKey) => api.put('/api/vlm/providers/openai/key', { api_key: apiKey }),
+  updateNvidiaKey: (apiKey) => api.put('/api/vlm/providers/nvidia/key', { api_key: apiKey }),
   deleteProviderKey: (provider) => api.delete(`/api/vlm/providers/${provider}/key`),
   testProvider: (provider) => api.post(`/api/vlm/providers/${provider}/test`),
 }

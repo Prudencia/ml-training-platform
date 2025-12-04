@@ -468,12 +468,117 @@ class OllamaProvider(VLMProvider):
         return []
 
 
+class NVIDIANIMProvider(VLMProvider):
+    """NVIDIA NIM API provider for vision models"""
+
+    def __init__(self, api_key: str, model: str = "microsoft/phi-3.5-vision-instruct"):
+        self.api_key = api_key
+        self.model = model
+        self.base_url = "https://integrate.api.nvidia.com/v1"
+        # NVIDIA NIM pricing (approximate, varies by model)
+        self.cost_per_input_token = 0.002 / 1000  # ~$2 per 1M input tokens
+        self.cost_per_output_token = 0.006 / 1000  # ~$6 per 1M output tokens
+
+    async def detect_objects(
+        self,
+        image_path: Path,
+        classes: List[str],
+        prompt: Optional[str] = None
+    ) -> VLMResponse:
+        try:
+            from openai import OpenAI
+        except ImportError:
+            return VLMResponse(
+                bboxes=[],
+                raw_response="",
+                tokens_used=0,
+                cost=0,
+                error="openai package not installed. Run: pip install openai"
+            )
+
+        system_prompt = self._build_system_prompt(classes)
+        user_prompt = prompt or self._build_user_prompt(classes)
+
+        image_data = self.encode_image(image_path)
+        media_type = self.get_media_type(image_path)
+
+        try:
+            client = OpenAI(
+                base_url=self.base_url,
+                api_key=self.api_key
+            )
+
+            response = client.chat.completions.create(
+                model=self.model,
+                max_tokens=4096,
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {
+                        "role": "user",
+                        "content": [
+                            {
+                                "type": "image_url",
+                                "image_url": {
+                                    "url": f"data:{media_type};base64,{image_data}"
+                                }
+                            },
+                            {"type": "text", "text": user_prompt}
+                        ]
+                    }
+                ]
+            )
+
+            response_text = response.choices[0].message.content
+            bboxes = self._parse_response(response_text, classes)
+
+            tokens_used = response.usage.total_tokens if response.usage else 0
+            cost = 0.0
+            if response.usage:
+                cost = (response.usage.prompt_tokens * self.cost_per_input_token +
+                       response.usage.completion_tokens * self.cost_per_output_token)
+
+            return VLMResponse(
+                bboxes=bboxes,
+                raw_response=response_text,
+                tokens_used=tokens_used,
+                cost=cost
+            )
+        except Exception as e:
+            return VLMResponse(
+                bboxes=[],
+                raw_response="",
+                tokens_used=0,
+                cost=0,
+                error=str(e)
+            )
+
+    def get_cost_estimate(self, image_count: int) -> float:
+        return image_count * (1500 * self.cost_per_input_token + 300 * self.cost_per_output_token)
+
+    def validate_connection(self) -> bool:
+        try:
+            from openai import OpenAI
+            client = OpenAI(
+                base_url=self.base_url,
+                api_key=self.api_key
+            )
+            # Test with a minimal request
+            response = client.chat.completions.create(
+                model=self.model,
+                messages=[{"role": "user", "content": "Hi"}],
+                max_tokens=10
+            )
+            return True
+        except Exception:
+            return False
+
+
 def get_vlm_provider(provider_type: str, settings: Dict[str, Any]) -> VLMProvider:
     """
     Factory function to get appropriate VLM provider.
 
     Args:
-        provider_type: One of "anthropic", "openai", "ollama"
+        provider_type: One of "anthropic", "openai", "ollama", "nvidia"
         settings: Dict containing API keys and endpoints
 
     Returns:
@@ -492,6 +597,13 @@ def get_vlm_provider(provider_type: str, settings: Dict[str, Any]) -> VLMProvide
             raise ValueError("OpenAI API key not configured. Set it in Settings.")
         model = settings.get("vlm_openai_model", "gpt-4o")
         return OpenAIProvider(api_key=api_key, model=model)
+
+    elif provider_type == "nvidia" or provider_type == "nim":
+        api_key = settings.get("vlm_nvidia_api_key")
+        if not api_key:
+            raise ValueError("NVIDIA API key not configured. Get one at https://build.nvidia.com/")
+        model = settings.get("vlm_nvidia_model", "microsoft/phi-3.5-vision-instruct")
+        return NVIDIANIMProvider(api_key=api_key, model=model)
 
     elif provider_type == "ollama":
         endpoint = settings.get("vlm_ollama_endpoint", "http://host.docker.internal:11434")

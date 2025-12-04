@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useRef } from 'react'
 import {
   Brain, Cloud, Server, Download, Trash2, RefreshCw, Check, X, AlertCircle,
-  Eye, EyeOff, Settings, Loader2, Plus, ExternalLink, HardDrive
+  Eye, EyeOff, Settings, Loader2, Plus, ExternalLink, HardDrive, Terminal,
+  Cpu, Gift, Zap
 } from 'lucide-react'
 import { vlmAPI } from '../services/api'
 
@@ -15,13 +16,18 @@ function VLM() {
   const [availableModels, setAvailableModels] = useState([])
   const [pullingModels, setPullingModels] = useState({}) // model -> progress
   const [ollamaEndpoint, setOllamaEndpoint] = useState('http://host.docker.internal:11434')
+  const [installInstructions, setInstallInstructions] = useState(null)
+  const [customModelName, setCustomModelName] = useState('')
+  const [modelFilter, setModelFilter] = useState('all') // 'all', 'llava', 'llama', 'efficient', 'advanced'
 
   // Cloud providers state
   const [providers, setProviders] = useState([])
   const [anthropicKey, setAnthropicKey] = useState('')
   const [openaiKey, setOpenaiKey] = useState('')
+  const [nvidiaKey, setNvidiaKey] = useState('')
   const [showAnthropicKey, setShowAnthropicKey] = useState(false)
   const [showOpenaiKey, setShowOpenaiKey] = useState(false)
+  const [showNvidiaKey, setShowNvidiaKey] = useState(false)
   const [savingKey, setSavingKey] = useState(null)
   const [testingProvider, setTestingProvider] = useState(null)
 
@@ -53,7 +59,6 @@ function VLM() {
             }))
 
             if (res.data.status === 'completed' || res.data.status === 'failed') {
-              // Refresh models list
               loadOllamaModels()
             }
           } catch (error) {
@@ -78,7 +83,8 @@ function VLM() {
         loadOllamaStatus(),
         loadOllamaModels(),
         loadAvailableModels(),
-        loadProviders()
+        loadProviders(),
+        loadInstallInstructions()
       ])
     } catch (error) {
       console.error('Failed to load VLM data:', error)
@@ -104,7 +110,6 @@ function VLM() {
       const res = await vlmAPI.listOllamaModels()
       setInstalledModels(res.data.models || [])
     } catch (error) {
-      // 503 means Ollama is not running - this is expected, not an error
       if (error.response?.status !== 503) {
         console.error('Failed to load Ollama models:', error)
       }
@@ -130,6 +135,15 @@ function VLM() {
     }
   }
 
+  const loadInstallInstructions = async () => {
+    try {
+      const res = await vlmAPI.getInstallInstructions()
+      setInstallInstructions(res.data)
+    } catch (error) {
+      console.error('Failed to load install instructions:', error)
+    }
+  }
+
   const handlePullModel = async (modelName) => {
     try {
       setPullingModels(prev => ({
@@ -139,6 +153,25 @@ function VLM() {
       await vlmAPI.pullModel(modelName)
     } catch (error) {
       console.error('Failed to start model pull:', error)
+      setPullingModels(prev => ({
+        ...prev,
+        [modelName]: { status: 'failed', error: error.message }
+      }))
+    }
+  }
+
+  const handlePullCustomModel = async () => {
+    if (!customModelName.trim()) return
+    const modelName = customModelName.trim()
+    try {
+      setPullingModels(prev => ({
+        ...prev,
+        [modelName]: { status: 'starting', progress: 0 }
+      }))
+      await vlmAPI.pullCustomModel(modelName)
+      setCustomModelName('')
+    } catch (error) {
+      console.error('Failed to start custom model pull:', error)
       setPullingModels(prev => ({
         ...prev,
         [modelName]: { status: 'failed', error: error.message }
@@ -185,6 +218,20 @@ function VLM() {
     }
   }
 
+  const handleSaveNvidiaKey = async () => {
+    if (!nvidiaKey.trim()) return
+    setSavingKey('nvidia')
+    try {
+      await vlmAPI.updateNvidiaKey(nvidiaKey)
+      setNvidiaKey('')
+      loadProviders()
+    } catch (error) {
+      alert('Failed to save API key: ' + (error.response?.data?.detail || error.message))
+    } finally {
+      setSavingKey(null)
+    }
+  }
+
   const handleDeleteKey = async (provider) => {
     if (!confirm(`Remove API key for ${provider}?`)) return
     try {
@@ -221,6 +268,18 @@ function VLM() {
   }
 
   const getProviderByName = (name) => providers.find(p => p.name === name)
+
+  const filteredModels = modelFilter === 'all'
+    ? availableModels
+    : availableModels.filter(m => m.category === modelFilter)
+
+  const categories = [
+    { id: 'all', label: 'All Models' },
+    { id: 'llava', label: 'LLaVA' },
+    { id: 'llama', label: 'LLaMA' },
+    { id: 'efficient', label: 'Efficient' },
+    { id: 'advanced', label: 'Advanced' }
+  ]
 
   if (loading) {
     return (
@@ -288,7 +347,7 @@ function VLM() {
                   ? 'bg-green-100 text-green-700'
                   : 'bg-red-100 text-red-700'
               }`}>
-                {ollamaStatus?.status === 'running' ? 'Running' : 'Not Running'}
+                {ollamaStatus?.status === 'running' ? `Running (v${ollamaStatus?.version || '?'})` : 'Not Running'}
               </div>
             </div>
 
@@ -296,20 +355,43 @@ function VLM() {
               <div className="bg-amber-50 border border-amber-200 rounded-lg p-4 mb-4">
                 <div className="flex items-start gap-3">
                   <AlertCircle className="text-amber-600 flex-shrink-0 mt-0.5" size={20} />
-                  <div>
+                  <div className="flex-1">
                     <p className="text-amber-800 font-medium">Ollama is not running</p>
-                    <p className="text-amber-700 text-sm mt-1">
-                      Install and start Ollama to use local VLM models. Visit{' '}
-                      <a
-                        href="https://ollama.ai"
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="underline hover:text-amber-900"
-                      >
-                        ollama.ai
-                      </a>
-                      {' '}for installation instructions.
+                    <p className="text-amber-700 text-sm mt-1 mb-3">
+                      Install and start Ollama to use local VLM models for free.
                     </p>
+
+                    {installInstructions && (
+                      <div className="bg-white rounded-lg p-3 border border-amber-200">
+                        <p className="text-sm font-medium text-gray-700 mb-2 flex items-center gap-2">
+                          <Terminal size={16} />
+                          Installation Instructions ({installInstructions.platform})
+                        </p>
+                        <ol className="text-sm text-gray-600 space-y-1 list-decimal list-inside">
+                          {installInstructions.steps?.map((step, i) => (
+                            <li key={i}>{step}</li>
+                          ))}
+                        </ol>
+                        {installInstructions.one_liner && (
+                          <div className="mt-3">
+                            <p className="text-xs text-gray-500 mb-1">Quick install:</p>
+                            <code className="block bg-gray-100 p-2 rounded text-xs font-mono break-all">
+                              {installInstructions.one_liner}
+                            </code>
+                          </div>
+                        )}
+                        <a
+                          href={installInstructions.download_url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="mt-3 inline-flex items-center gap-1 text-sm text-purple-600 hover:underline"
+                        >
+                          <Download size={14} />
+                          Download from ollama.ai
+                          <ExternalLink size={12} />
+                        </a>
+                      </div>
+                    )}
                   </div>
                 </div>
               </div>
@@ -323,7 +405,7 @@ function VLM() {
                   value={ollamaEndpoint}
                   onChange={(e) => setOllamaEndpoint(e.target.value)}
                   className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500"
-                  placeholder="http://localhost:11434"
+                  placeholder="http://host.docker.internal:11434"
                 />
               </div>
               <button
@@ -359,7 +441,7 @@ function VLM() {
                       <div className="font-medium">{model.name}</div>
                       <div className="text-sm text-gray-500">
                         {model.size_gb ? `${model.size_gb} GB` : 'Size unknown'}
-                        {model.digest && ` • ${model.digest}`}
+                        {model.digest && ` . ${model.digest}`}
                       </div>
                     </div>
                     <button
@@ -375,15 +457,86 @@ function VLM() {
             )}
           </div>
 
-          {/* Available Models to Pull */}
+          {/* Custom Model Pull */}
           <div className="bg-white rounded-lg shadow p-6">
             <h2 className="text-lg font-semibold mb-4 flex items-center gap-2">
-              <Download size={20} />
-              Available VLM Models
+              <Plus size={20} />
+              Install Custom Model
             </h2>
+            <p className="text-sm text-gray-500 mb-3">
+              Pull any model from the{' '}
+              <a
+                href="https://ollama.ai/library"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-purple-600 hover:underline"
+              >
+                Ollama library
+                <ExternalLink size={12} className="inline ml-1" />
+              </a>
+            </p>
+            <div className="flex gap-2">
+              <input
+                type="text"
+                value={customModelName}
+                onChange={(e) => setCustomModelName(e.target.value)}
+                placeholder="e.g., llava:latest, llama3.2-vision:11b"
+                className="flex-1 px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500"
+                onKeyPress={(e) => e.key === 'Enter' && handlePullCustomModel()}
+              />
+              <button
+                onClick={handlePullCustomModel}
+                disabled={!customModelName.trim() || ollamaStatus?.status !== 'running'}
+                className="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 disabled:opacity-50 flex items-center gap-2"
+              >
+                <Download size={18} />
+                Pull
+              </button>
+            </div>
+            {pullingModels[customModelName] && (
+              <div className="mt-3">
+                <div className="flex justify-between text-xs text-gray-500 mb-1">
+                  <span className="capitalize">{pullingModels[customModelName].status}...</span>
+                  <span>{pullingModels[customModelName].progress?.toFixed(0) || 0}%</span>
+                </div>
+                <div className="w-full bg-gray-200 rounded-full h-2">
+                  <div
+                    className="bg-purple-600 h-2 rounded-full transition-all"
+                    style={{ width: `${pullingModels[customModelName].progress || 0}%` }}
+                  />
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Available Models to Pull */}
+          <div className="bg-white rounded-lg shadow p-6">
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-lg font-semibold flex items-center gap-2">
+                <Download size={20} />
+                Available VLM Models
+              </h2>
+            </div>
+
+            {/* Category Filter */}
+            <div className="flex flex-wrap gap-2 mb-4">
+              {categories.map(cat => (
+                <button
+                  key={cat.id}
+                  onClick={() => setModelFilter(cat.id)}
+                  className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
+                    modelFilter === cat.id
+                      ? 'bg-purple-600 text-white'
+                      : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                  }`}
+                >
+                  {cat.label}
+                </button>
+              ))}
+            </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              {availableModels.map((model) => {
+              {filteredModels.map((model) => {
                 const isInstalled = installedModels.some(m => m.name.startsWith(model.name.split(':')[0]))
                 const pullStatus = pullingModels[model.name]
                 const isPulling = pullStatus && (pullStatus.status === 'pulling' || pullStatus.status === 'starting' || pullStatus.status === 'verifying')
@@ -397,17 +550,22 @@ function VLM() {
                   >
                     <div className="flex items-start justify-between">
                       <div>
-                        <div className="font-medium flex items-center gap-2">
+                        <div className="font-medium flex items-center gap-2 flex-wrap">
                           {model.display_name}
                           {model.recommended && (
                             <span className="px-2 py-0.5 bg-purple-100 text-purple-700 text-xs rounded-full">
                               Recommended
                             </span>
                           )}
+                          {model.category === 'efficient' && (
+                            <span className="px-2 py-0.5 bg-green-100 text-green-700 text-xs rounded-full flex items-center gap-1">
+                              <Zap size={10} /> Fast
+                            </span>
+                          )}
                         </div>
                         <div className="text-sm text-gray-500 mt-1">{model.description}</div>
                         <div className="text-xs text-gray-400 mt-1">
-                          ~{model.size_gb} GB • {model.name}
+                          ~{model.size_gb} GB . {model.name}
                         </div>
                       </div>
                       {isInstalled ? (
@@ -458,6 +616,114 @@ function VLM() {
       {/* Cloud Providers Tab */}
       {activeTab === 'cloud' && (
         <div className="space-y-6">
+          {/* NVIDIA NIM */}
+          <div className="bg-white rounded-lg shadow p-6">
+            <div className="flex items-center justify-between mb-4">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 bg-green-100 rounded-lg flex items-center justify-center">
+                  <Cpu className="text-green-600" size={24} />
+                </div>
+                <div>
+                  <h2 className="text-lg font-semibold flex items-center gap-2">
+                    NVIDIA NIM
+                    <span className="px-2 py-0.5 bg-green-100 text-green-700 text-xs rounded-full flex items-center gap-1">
+                      <Gift size={10} /> 1000 Free Credits
+                    </span>
+                  </h2>
+                  <p className="text-sm text-gray-500">NVIDIA vision models (Phi-3.5, VILA, LLaMA)</p>
+                </div>
+              </div>
+              {getProviderByName('nvidia')?.is_configured ? (
+                <span className="px-3 py-1 bg-green-100 text-green-700 rounded-full text-sm font-medium">
+                  Configured
+                </span>
+              ) : (
+                <span className="px-3 py-1 bg-gray-100 text-gray-600 rounded-full text-sm font-medium">
+                  Not Configured
+                </span>
+              )}
+            </div>
+
+            {getProviderByName('nvidia')?.is_configured ? (
+              <div className="space-y-3">
+                <div className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
+                  <div>
+                    <span className="text-sm text-gray-600">API Key: </span>
+                    <span className="font-mono">{getProviderByName('nvidia')?.key_hint}</span>
+                  </div>
+                  <div className="flex gap-2">
+                    <button
+                      onClick={() => handleTestProvider('nvidia')}
+                      disabled={testingProvider === 'nvidia'}
+                      className="px-3 py-1.5 bg-blue-100 text-blue-700 rounded-lg hover:bg-blue-200 text-sm flex items-center gap-1"
+                    >
+                      {testingProvider === 'nvidia' ? (
+                        <Loader2 size={14} className="animate-spin" />
+                      ) : (
+                        <Check size={14} />
+                      )}
+                      Test
+                    </button>
+                    <button
+                      onClick={() => handleDeleteKey('nvidia')}
+                      className="px-3 py-1.5 bg-red-100 text-red-700 rounded-lg hover:bg-red-200 text-sm"
+                    >
+                      Remove
+                    </button>
+                  </div>
+                </div>
+                <p className="text-xs text-gray-500">
+                  Models: phi-3.5-vision, nvidia/vila, llama-3.2-90b-vision
+                </p>
+              </div>
+            ) : (
+              <div className="space-y-3">
+                <div className="flex gap-2">
+                  <div className="flex-1 relative">
+                    <input
+                      type={showNvidiaKey ? 'text' : 'password'}
+                      value={nvidiaKey}
+                      onChange={(e) => setNvidiaKey(e.target.value)}
+                      placeholder="nvapi-..."
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 pr-10"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowNvidiaKey(!showNvidiaKey)}
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+                    >
+                      {showNvidiaKey ? <EyeOff size={18} /> : <Eye size={18} />}
+                    </button>
+                  </div>
+                  <button
+                    onClick={handleSaveNvidiaKey}
+                    disabled={!nvidiaKey.trim() || savingKey === 'nvidia'}
+                    className="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 disabled:opacity-50 flex items-center gap-2"
+                  >
+                    {savingKey === 'nvidia' ? (
+                      <Loader2 size={16} className="animate-spin" />
+                    ) : (
+                      <Plus size={16} />
+                    )}
+                    Save
+                  </button>
+                </div>
+                <p className="text-xs text-gray-500">
+                  Get your API key (1000 free credits) from{' '}
+                  <a
+                    href="https://build.nvidia.com/"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-purple-600 hover:underline"
+                  >
+                    build.nvidia.com
+                    <ExternalLink size={12} className="inline ml-1" />
+                  </a>
+                </p>
+              </div>
+            )}
+          </div>
+
           {/* Anthropic */}
           <div className="bg-white rounded-lg shadow p-6">
             <div className="flex items-center justify-between mb-4">
@@ -467,7 +733,7 @@ function VLM() {
                 </div>
                 <div>
                   <h2 className="text-lg font-semibold">Anthropic Claude</h2>
-                  <p className="text-sm text-gray-500">Claude 3.5 Sonnet for vision tasks</p>
+                  <p className="text-sm text-gray-500">Claude 4 Sonnet for vision tasks</p>
                 </div>
               </div>
               {getProviderByName('anthropic')?.is_configured ? (
@@ -510,7 +776,7 @@ function VLM() {
                   </div>
                 </div>
                 <p className="text-xs text-gray-500">
-                  Cost: ~$0.01 per image • Models: claude-3-5-sonnet
+                  Cost: ~$0.01 per image . Models: claude-sonnet-4
                 </p>
               </div>
             ) : (
@@ -565,8 +831,8 @@ function VLM() {
           <div className="bg-white rounded-lg shadow p-6">
             <div className="flex items-center justify-between mb-4">
               <div className="flex items-center gap-3">
-                <div className="w-10 h-10 bg-green-100 rounded-lg flex items-center justify-center">
-                  <Brain className="text-green-600" size={24} />
+                <div className="w-10 h-10 bg-teal-100 rounded-lg flex items-center justify-center">
+                  <Brain className="text-teal-600" size={24} />
                 </div>
                 <div>
                   <h2 className="text-lg font-semibold">OpenAI GPT-4 Vision</h2>
@@ -613,7 +879,7 @@ function VLM() {
                   </div>
                 </div>
                 <p className="text-xs text-gray-500">
-                  Cost: ~$0.008 per image • Models: gpt-4o, gpt-4-turbo
+                  Cost: ~$0.008 per image . Models: gpt-4o, gpt-4-turbo
                 </p>
               </div>
             ) : (
@@ -668,10 +934,11 @@ function VLM() {
           <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
             <h3 className="font-medium text-blue-800 mb-2">About Cloud VLM Providers</h3>
             <ul className="text-sm text-blue-700 space-y-1">
-              <li>• Cloud providers charge per image processed (costs shown above)</li>
-              <li>• API keys are stored securely and never shared</li>
-              <li>• For free local processing, use Ollama with LLaVA models</li>
-              <li>• Cloud providers typically have higher accuracy than local models</li>
+              <li>. Cloud providers charge per image processed (costs shown above)</li>
+              <li>. NVIDIA NIM offers 1000 free credits for new users</li>
+              <li>. API keys are stored securely and never shared</li>
+              <li>. For free unlimited processing, use Ollama with local models</li>
+              <li>. Cloud providers typically have higher accuracy than local models</li>
             </ul>
           </div>
         </div>
