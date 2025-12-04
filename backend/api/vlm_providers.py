@@ -81,50 +81,45 @@ class VLMProvider(ABC):
 
     def _build_system_prompt(self, classes: List[str]) -> str:
         """Build system prompt for object detection"""
-        return f"""You are an expert object detection system. Your task is to identify and locate objects in images.
+        return f"""You are an object detector. Find objects in images and return their locations as JSON.
 
-OUTPUT FORMAT:
-Return ONLY a JSON array of detected objects. Each object must have:
-- "class": One of the allowed classes (exactly as written)
-- "bbox": [x_min, y_min, x_max, y_max] as percentages (0-100) of image dimensions
-- "confidence": Your confidence score (0.0-1.0)
+Classes to find: {', '.join(classes)}
 
-ALLOWED CLASSES: {', '.join(classes)}
+Return a JSON array like this:
+[{{"class": "person", "bbox": [10, 20, 45, 80], "confidence": 0.9}}]
 
-Example output:
-[
-  {{"class": "person", "bbox": [10.5, 20.0, 45.2, 80.0], "confidence": 0.95}},
-  {{"class": "car", "bbox": [50.0, 40.0, 90.0, 75.0], "confidence": 0.88}}
-]
+bbox = [left%, top%, right%, bottom%] where values are 0-100 representing percentage of image size.
 
-RULES:
-1. Only detect objects from the ALLOWED CLASSES list
-2. Be precise with bounding box coordinates
-3. Only include objects you are confident about (>0.3 confidence)
-4. If no objects are detected, return an empty array: []
-5. Return ONLY valid JSON, no explanations or other text
-6. bbox format is [x_min, y_min, x_max, y_max] where all values are percentages 0-100"""
+Return ONLY the JSON array, nothing else. If no objects found, return: []"""
 
     def _build_user_prompt(self, classes: List[str]) -> str:
         """Build user prompt for object detection"""
-        return f"Detect all instances of these objects in the image: {', '.join(classes)}. Return the results as a JSON array."
+        return f"Find all {', '.join(classes)} in this image. Return JSON array with class, bbox [left%, top%, right%, bottom%], and confidence for each object found."
 
     def _parse_response(self, response_text: str, classes: List[str]) -> List[BoundingBox]:
         """Parse VLM response text into bounding boxes"""
+        # Log raw response for debugging
+        print(f"VLM raw response (first 500 chars): {response_text[:500]}")
+
         # Extract JSON from response (handle markdown code blocks)
         json_match = re.search(r'```(?:json)?\s*(\[.*?\])\s*```', response_text, re.DOTALL)
         if json_match:
             json_str = json_match.group(1)
+            print(f"Found JSON in code block: {json_str[:200]}")
         else:
             # Try to find raw JSON array
             json_match = re.search(r'\[.*\]', response_text, re.DOTALL)
             if not json_match:
+                print("No JSON array found in response")
                 return []
             json_str = json_match.group()
+            print(f"Found raw JSON: {json_str[:200]}")
 
         try:
             detections = json.loads(json_str)
-        except json.JSONDecodeError:
+            print(f"Parsed {len(detections)} detections")
+        except json.JSONDecodeError as e:
+            print(f"JSON parse error: {e}")
             return []
 
         bboxes = []
