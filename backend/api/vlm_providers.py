@@ -404,12 +404,22 @@ class OllamaProvider(VLMProvider):
 
         try:
             async with httpx.AsyncClient(timeout=180.0) as client:
+                # Use /api/chat for vision models (newer Ollama API)
                 response = await client.post(
-                    f"{self.endpoint}/api/generate",
+                    f"{self.endpoint}/api/chat",
                     json={
                         "model": self.model,
-                        "prompt": f"{system_prompt}\n\n{user_prompt}",
-                        "images": [image_data],
+                        "messages": [
+                            {
+                                "role": "system",
+                                "content": system_prompt
+                            },
+                            {
+                                "role": "user",
+                                "content": user_prompt,
+                                "images": [image_data]
+                            }
+                        ],
                         "stream": False,
                         "options": {
                             "temperature": 0.1,  # Low temp for consistent output
@@ -420,7 +430,8 @@ class OllamaProvider(VLMProvider):
                 response.raise_for_status()
                 data = response.json()
 
-            response_text = data.get("response", "")
+            # Extract response from chat format
+            response_text = data.get("message", {}).get("content", "")
             bboxes = self._parse_response(response_text, classes)
 
             return VLMResponse(
