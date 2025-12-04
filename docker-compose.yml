@@ -5,15 +5,12 @@ services:
     build:
       context: ./backend
       dockerfile: Dockerfile
-    ports:
-      - "8081:8000"
+    network_mode: host  # Use host networking so backend can reach Ollama on localhost
     volumes:
       - ./backend/storage:/app/storage
       - ./backend/database:/app/database
     environment:
       - PYTHONUNBUFFERED=1
-    extra_hosts:
-      - "host.docker.internal:host-gateway"  # Allow container to access host services (Ollama)
     shm_size: '8gb'  # Increase shared memory for PyTorch DataLoader workers
     restart: unless-stopped
     # GPU support enabled by default (requires nvidia-container-toolkit)
