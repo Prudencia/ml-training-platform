@@ -376,7 +376,7 @@ class OpenAIProvider(VLMProvider):
 class OllamaProvider(VLMProvider):
     """Ollama local VLM provider (LLaVA, etc.)"""
 
-    def __init__(self, endpoint: str = "http://localhost:11434", model: str = "llava:13b"):
+    def __init__(self, endpoint: str = "http://host.docker.internal:11434", model: str = "llava:13b"):
         self.endpoint = endpoint.rstrip("/")
         self.model = model
 
@@ -606,7 +606,9 @@ def get_vlm_provider(provider_type: str, settings: Dict[str, Any]) -> VLMProvide
         return NVIDIANIMProvider(api_key=api_key, model=model)
 
     elif provider_type == "ollama":
-        endpoint = settings.get("vlm_ollama_endpoint", "http://localhost:11434")
+        import os
+        default_endpoint = os.environ.get("OLLAMA_HOST", "http://host.docker.internal:11434")
+        endpoint = settings.get("vlm_ollama_endpoint", default_endpoint)
         model = settings.get("vlm_ollama_model", "llava:13b")
         return OllamaProvider(endpoint=endpoint, model=model)
 
