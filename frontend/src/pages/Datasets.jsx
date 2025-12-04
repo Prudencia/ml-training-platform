@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react'
 import { useDropzone } from 'react-dropzone'
-import { Link, Globe, Upload, Loader2, FileArchive, X, Download, Search } from 'lucide-react'
+import { Link, Globe, Upload, Loader2, FileArchive, X, Download, Search, CheckCircle, AlertCircle } from 'lucide-react'
 import { datasetsAPI } from '../services/api'
 
 const API_URL = import.meta.env.VITE_API_URL || ''
@@ -45,6 +45,10 @@ function Datasets() {
   const [importTab, setImportTab] = useState('url') // 'url' or 'coco'
   const [importing, setImporting] = useState(false)
   const [importProgress, setImportProgress] = useState('')
+
+  // Download state
+  const [downloadingId, setDownloadingId] = useState(null)
+  const [downloadNotification, setDownloadNotification] = useState(null)
 
   // URL import state
   const [urlImport, setUrlImport] = useState({
@@ -147,18 +151,40 @@ function Datasets() {
   }
 
   const handleDownload = async (dataset) => {
+    setDownloadingId(dataset.id)
+    setDownloadNotification({ type: 'loading', message: `Preparing ${dataset.name}.zip...` })
+
     try {
-      // Trigger download via browser
       const downloadUrl = `${API_URL}/api/datasets/${dataset.id}/download`
+
+      // Fetch to check if download starts successfully
+      const response = await fetch(downloadUrl)
+
+      if (!response.ok) {
+        throw new Error('Download failed')
+      }
+
+      // Get the blob and trigger download
+      const blob = await response.blob()
+      const url = window.URL.createObjectURL(blob)
       const link = document.createElement('a')
-      link.href = downloadUrl
+      link.href = url
       link.download = `${dataset.name}.zip`
       document.body.appendChild(link)
       link.click()
       document.body.removeChild(link)
+      window.URL.revokeObjectURL(url)
+
+      setDownloadNotification({ type: 'success', message: `${dataset.name}.zip downloaded successfully!` })
+
+      // Clear notification after 3 seconds
+      setTimeout(() => setDownloadNotification(null), 3000)
     } catch (error) {
       console.error('Failed to download dataset:', error)
-      alert('Failed to download dataset')
+      setDownloadNotification({ type: 'error', message: 'Failed to download dataset' })
+      setTimeout(() => setDownloadNotification(null), 3000)
+    } finally {
+      setDownloadingId(null)
     }
   }
 
@@ -329,6 +355,26 @@ function Datasets() {
 
   return (
     <div className="space-y-4 sm:space-y-6">
+      {/* Download Notification Toast */}
+      {downloadNotification && (
+        <div className={`fixed top-4 right-4 z-50 flex items-center gap-3 px-4 py-3 rounded-lg shadow-lg transition-all ${
+          downloadNotification.type === 'loading' ? 'bg-blue-50 border border-blue-200 text-blue-700' :
+          downloadNotification.type === 'success' ? 'bg-green-50 border border-green-200 text-green-700' :
+          'bg-red-50 border border-red-200 text-red-700'
+        }`}>
+          {downloadNotification.type === 'loading' && <Loader2 size={20} className="animate-spin" />}
+          {downloadNotification.type === 'success' && <CheckCircle size={20} />}
+          {downloadNotification.type === 'error' && <AlertCircle size={20} />}
+          <span className="font-medium">{downloadNotification.message}</span>
+          <button
+            onClick={() => setDownloadNotification(null)}
+            className="ml-2 hover:opacity-70"
+          >
+            <X size={16} />
+          </button>
+        </div>
+      )}
+
       <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-4">
         <h1 className="text-2xl sm:text-3xl font-bold text-orange-600">Datasets</h1>
         <div className="flex gap-2">
@@ -454,10 +500,24 @@ function Datasets() {
               </button>
               <button
                 onClick={() => handleDownload(dataset)}
-                className="px-2 py-1.5 bg-purple-100 text-purple-700 rounded hover:bg-purple-200 text-xs font-medium flex items-center justify-center gap-1"
+                disabled={downloadingId === dataset.id}
+                className={`px-2 py-1.5 rounded text-xs font-medium flex items-center justify-center gap-1 ${
+                  downloadingId === dataset.id
+                    ? 'bg-purple-200 text-purple-500 cursor-wait'
+                    : 'bg-purple-100 text-purple-700 hover:bg-purple-200'
+                }`}
               >
-                <Download size={12} />
-                Download
+                {downloadingId === dataset.id ? (
+                  <>
+                    <Loader2 size={12} className="animate-spin" />
+                    Preparing...
+                  </>
+                ) : (
+                  <>
+                    <Download size={12} />
+                    Download
+                  </>
+                )}
               </button>
               <button
                 onClick={() => handleDelete(dataset.id)}
