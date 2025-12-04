@@ -180,10 +180,16 @@ function VLM() {
   }
 
   const handleDeleteModel = async (modelName) => {
-    if (!confirm(`Delete model "${modelName}"? This cannot be undone.`)) return
+    // Find the actual installed model name (could be llava:latest when we asked for llava:7b)
+    const installedModel = installedModels.find(m =>
+      m.name === modelName || m.name === modelName.split(':')[0] + ':latest'
+    )
+    const actualModelName = installedModel?.name || modelName
+
+    if (!confirm(`Delete model "${actualModelName}"? This cannot be undone.`)) return
 
     try {
-      await vlmAPI.deleteModel(modelName)
+      await vlmAPI.deleteModel(actualModelName)
       loadOllamaModels()
     } catch (error) {
       alert('Failed to delete model: ' + (error.response?.data?.detail || error.message))
@@ -569,7 +575,14 @@ function VLM() {
                         </div>
                       </div>
                       {isInstalled ? (
-                        <Check className="text-green-600" size={20} />
+                        <button
+                          onClick={() => handleDeleteModel(model.name)}
+                          className="px-3 py-1.5 bg-red-100 text-red-700 text-sm rounded-lg hover:bg-red-200 flex items-center gap-1"
+                          title="Remove model"
+                        >
+                          <Trash2 size={14} />
+                          Remove
+                        </button>
                       ) : isPulling ? (
                         <Loader2 className="animate-spin text-purple-600" size={20} />
                       ) : (
