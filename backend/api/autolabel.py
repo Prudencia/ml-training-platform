@@ -1332,8 +1332,8 @@ async def get_vlm_providers(db: Session = Depends(get_db)):
         "provider_type": "local",
         "is_configured": True,  # Always configured with default endpoint
         "is_available": ollama_available,
-        "models": ollama_models if ollama_models else ["llava:13b", "llava:7b"],
-        "default_model": settings.get("vlm_ollama_model", "llava:13b"),
+        "models": ollama_models,  # Only show actually installed models
+        "default_model": ollama_models[0] if ollama_models else None,
         "estimated_cost_per_image": 0.0,
         "endpoint": ollama_endpoint
     })

@@ -459,19 +459,14 @@ class OllamaProvider(VLMProvider):
             return False
 
     def list_available_models(self) -> List[str]:
-        """List models available in Ollama that support vision"""
+        """List all installed models in Ollama (for auto-labeling, user selects the model)"""
         try:
             import httpx
             response = httpx.get(f"{self.endpoint}/api/tags", timeout=10.0)
             if response.status_code == 200:
                 data = response.json()
-                vision_models = []
-                for model in data.get("models", []):
-                    name = model.get("name", "")
-                    # Filter for vision-capable models
-                    if any(v in name.lower() for v in ["llava", "bakllava", "vision", "llama3.2-vision"]):
-                        vision_models.append(name)
-                return vision_models
+                # Return all installed models - user can select which to use
+                return [model.get("name", "") for model in data.get("models", []) if model.get("name")]
         except Exception:
             pass
         return []
