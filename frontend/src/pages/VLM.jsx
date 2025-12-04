@@ -104,7 +104,10 @@ function VLM() {
       const res = await vlmAPI.listOllamaModels()
       setInstalledModels(res.data.models || [])
     } catch (error) {
-      console.error('Failed to load Ollama models:', error)
+      // 503 means Ollama is not running - this is expected, not an error
+      if (error.response?.status !== 503) {
+        console.error('Failed to load Ollama models:', error)
+      }
       setInstalledModels([])
     }
   }
