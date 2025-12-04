@@ -59,6 +59,7 @@ function Annotate() {
   const [modelType, setModelType] = useState('yolo') // 'yolo' or 'vlm'
   const [vlmProviders, setVlmProviders] = useState([])
   const [selectedVLMProvider, setSelectedVLMProvider] = useState('')
+  const [selectedOllamaModel, setSelectedOllamaModel] = useState('')
   const [vlmClasses, setVlmClasses] = useState([])
   const [vlmCostEstimate, setVlmCostEstimate] = useState(null)
 
@@ -407,6 +408,14 @@ function Annotate() {
       setVlmClasses(projectClasses.map(c => c.name))
     }
 
+    // For Ollama, auto-select first available model
+    if (provider === 'ollama') {
+      const ollamaProvider = vlmProviders.find(p => p.name === 'ollama')
+      if (ollamaProvider?.models?.length > 0 && !selectedOllamaModel) {
+        setSelectedOllamaModel(ollamaProvider.models[0])
+      }
+    }
+
     // Get cost estimate for cloud providers
     if (provider && provider !== 'ollama' && selectedProject) {
       try {
@@ -428,12 +437,17 @@ function Annotate() {
 
   const handleStartVLMAutoLabel = async () => {
     if (!selectedProject || !selectedVLMProvider || vlmClasses.length === 0) return
+    if (selectedVLMProvider === 'ollama' && !selectedOllamaModel) {
+      alert('Please select an Ollama model')
+      return
+    }
     setAutoLabelLoading(true)
 
     try {
       const res = await autolabelAPI.createVLMJob({
         project_id: selectedProject.id,
         provider: selectedVLMProvider,
+        model: selectedVLMProvider === 'ollama' ? selectedOllamaModel : undefined,
         classes: vlmClasses,
         confidence_threshold: confidence,
         batch_size: selectedVLMProvider === 'ollama' ? 50 : 10, // Smaller batches for cloud APIs
@@ -1254,40 +1268,76 @@ function Annotate() {
                         <div>
                           <label className="block text-sm font-medium text-gray-700 mb-2">Select VLM Provider</label>
                           <div className="grid grid-cols-3 gap-3">
-                            {vlmProviders.map((provider) => (
-                              <button
-                                key={provider.name}
-                                onClick={() => handleVLMProviderSelect(provider.name)}
-                                disabled={!provider.configured}
-                                className={`p-3 rounded-lg border-2 text-center transition-all ${
-                                  selectedVLMProvider === provider.name
-                                    ? 'border-purple-600 bg-purple-50'
-                                    : provider.configured
-                                    ? 'border-gray-200 hover:border-purple-300'
-                                    : 'border-gray-200 bg-gray-50 opacity-60 cursor-not-allowed'
-                                }`}
-                              >
-                                <div className="font-medium text-sm capitalize">{provider.name}</div>
-                                <div className="text-xs mt-1">
-                                  {provider.configured ? (
-                                    provider.name === 'ollama' ? (
-                                      <span className="text-green-600">Free (Local)</span>
-                                    ) : (
+                            {vlmProviders.map((provider) => {
+                              const isConfigured = provider.is_configured || provider.configured
+                              const isAvailable = provider.is_available || provider.available
+                              return (
+                                <button
+                                  key={provider.name}
+                                  onClick={() => handleVLMProviderSelect(provider.name)}
+                                  disabled={!isConfigured || (provider.name === 'ollama' && !isAvailable)}
+                                  className={`p-3 rounded-lg border-2 text-center transition-all ${
+                                    selectedVLMProvider === provider.name
+                                      ? 'border-purple-600 bg-purple-50'
+                                      : isConfigured && (provider.name !== 'ollama' || isAvailable)
+                                      ? 'border-gray-200 hover:border-purple-300'
+                                      : 'border-gray-200 bg-gray-50 opacity-60 cursor-not-allowed'
+                                  }`}
+                                >
+                                  <div className="font-medium text-sm capitalize">{provider.display_name || provider.name}</div>
+                                  <div className="text-xs mt-1">
+                                    {provider.name === 'ollama' ? (
+                                      isAvailable ? (
+                                        <span className="text-green-600">Free (Local) - {provider.models?.length || 0} models</span>
+                                      ) : (
+                                        <span className="text-amber-600">Not running</span>
+                                      )
+                                    ) : isConfigured ? (
                                       <span className="text-green-600">Configured</span>
-                                    )
-                                  ) : (
-                                    <span className="text-gray-400">Not configured</span>
-                                  )}
-                                </div>
-                              </button>
-                            ))}
+                                    ) : (
+                                      <span className="text-gray-400">Not configured</span>
+                                    )}
+                                  </div>
+                                </button>
+                              )
+                            })}
                           </div>
-                          {vlmProviders.every(p => !p.configured) && (
+                          {vlmProviders.every(p => !(p.is_configured || p.configured)) && (
                             <p className="text-sm text-amber-600 mt-2">
-                              No VLM providers configured. Go to Settings to add API keys.
+                              No VLM providers configured. Go to VLM page to install models or add API keys.
                             </p>
                           )}
                         </div>
+
+                        {/* Ollama Model Selection */}
+                        {selectedVLMProvider === 'ollama' && (
+                          <div>
+                            <label className="block text-sm font-medium text-gray-700 mb-2">Select Ollama Model</label>
+                            {(() => {
+                              const ollamaProvider = vlmProviders.find(p => p.name === 'ollama')
+                              const models = ollamaProvider?.models || []
+                              return models.length > 0 ? (
+                                <select
+                                  value={selectedOllamaModel}
+                                  onChange={(e) => setSelectedOllamaModel(e.target.value)}
+                                  className="w-full border border-gray-300 rounded-md p-2"
+                                >
+                                  {models.map((model, idx) => (
+                                    <option key={idx} value={model}>
+                                      {model}
+                                    </option>
+                                  ))}
+                                </select>
+                              ) : (
+                                <div className="p-3 bg-amber-50 border border-amber-200 rounded-lg">
+                                  <p className="text-amber-800 text-sm">
+                                    No vision models installed. Go to VLM page to install LLaVA or other vision models.
+                                  </p>
+                                </div>
+                              )
+                            })()}
+                          </div>
+                        )}
 
                         {/* Cost Estimate */}
                         {vlmCostEstimate && selectedVLMProvider !== 'ollama' && (

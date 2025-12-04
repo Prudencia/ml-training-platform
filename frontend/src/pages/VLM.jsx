@@ -537,7 +537,7 @@ function VLM() {
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               {filteredModels.map((model) => {
-                const isInstalled = installedModels.some(m => m.name.startsWith(model.name.split(':')[0]))
+                const isInstalled = installedModels.some(m => m.name === model.name || m.name === model.name.split(':')[0] + ':latest')
                 const pullStatus = pullingModels[model.name]
                 const isPulling = pullStatus && (pullStatus.status === 'pulling' || pullStatus.status === 'starting' || pullStatus.status === 'verifying')
 
