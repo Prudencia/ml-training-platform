@@ -1237,3 +1237,353 @@ def _update_project_counts(project_id: int, db: Session):
     project.annotated_images = annotated
     project.updated_at = datetime.utcnow()
     db.commit()
+
+
+# ============ VLM Auto-Labeling ============
+
+class VLMJobCreate(BaseModel):
+    """Request model for creating a VLM auto-labeling job"""
+    project_id: int
+    provider: str  # "anthropic", "openai", "ollama"
+    classes: List[str]  # Classes to detect
+    confidence_threshold: float = 0.5
+    batch_size: int = 10  # Smaller batches for API rate limits
+    only_unannotated: bool = True
+    custom_prompt: Optional[str] = None
+
+
+def _get_vlm_settings(db: Session) -> dict:
+    """Get VLM-related settings from database"""
+    from database import SystemSettings
+
+    settings = {}
+    keys = [
+        "vlm_anthropic_api_key",
+        "vlm_openai_api_key",
+        "vlm_ollama_endpoint",
+        "vlm_ollama_model"
+    ]
+
+    for key in keys:
+        setting = db.query(SystemSettings).filter(SystemSettings.key == key).first()
+        if setting:
+            settings[key] = setting.value
+
+    # Default values
+    if "vlm_ollama_endpoint" not in settings:
+        settings["vlm_ollama_endpoint"] = "http://localhost:11434"
+    if "vlm_ollama_model" not in settings:
+        settings["vlm_ollama_model"] = "llava:13b"
+
+    return settings
+
+
+@router.get("/vlm/providers")
+async def get_vlm_providers(db: Session = Depends(get_db)):
+    """Get list of available VLM providers and their status"""
+    from api.vlm_providers import OllamaProvider
+
+    settings = _get_vlm_settings(db)
+    providers = []
+
+    # Anthropic Claude
+    anthropic_key = settings.get("vlm_anthropic_api_key")
+    providers.append({
+        "name": "anthropic",
+        "display_name": "Anthropic Claude",
+        "provider_type": "cloud",
+        "is_configured": bool(anthropic_key),
+        "is_available": bool(anthropic_key),
+        "models": ["claude-sonnet-4-20250514", "claude-opus-4-20250514"],
+        "default_model": "claude-sonnet-4-20250514",
+        "estimated_cost_per_image": 0.01
+    })
+
+    # OpenAI GPT-4V
+    openai_key = settings.get("vlm_openai_api_key")
+    providers.append({
+        "name": "openai",
+        "display_name": "OpenAI GPT-4 Vision",
+        "provider_type": "cloud",
+        "is_configured": bool(openai_key),
+        "is_available": bool(openai_key),
+        "models": ["gpt-4o", "gpt-4-turbo"],
+        "default_model": "gpt-4o",
+        "estimated_cost_per_image": 0.008
+    })
+
+    # Ollama (local)
+    ollama_endpoint = settings.get("vlm_ollama_endpoint", "http://localhost:11434")
+    ollama_available = False
+    ollama_models = []
+
+    try:
+        ollama_provider = OllamaProvider(endpoint=ollama_endpoint)
+        ollama_available = ollama_provider.validate_connection()
+        if ollama_available:
+            ollama_models = ollama_provider.list_available_models()
+    except Exception:
+        pass
+
+    providers.append({
+        "name": "ollama",
+        "display_name": "Ollama (Local)",
+        "provider_type": "local",
+        "is_configured": True,  # Always configured with default endpoint
+        "is_available": ollama_available,
+        "models": ollama_models if ollama_models else ["llava:13b", "llava:7b"],
+        "default_model": settings.get("vlm_ollama_model", "llava:13b"),
+        "estimated_cost_per_image": 0.0,
+        "endpoint": ollama_endpoint
+    })
+
+    return {"providers": providers}
+
+
+@router.get("/vlm/cost-estimate")
+async def estimate_vlm_cost(
+    project_id: int,
+    provider: str,
+    only_unannotated: bool = True,
+    db: Session = Depends(get_db)
+):
+    """Estimate cost for VLM auto-labeling"""
+    from api.vlm_providers import get_vlm_provider
+
+    settings = _get_vlm_settings(db)
+
+    try:
+        vlm_provider = get_vlm_provider(provider, settings)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    if only_unannotated:
+        image_count = db.query(AnnotationImage).filter(
+            AnnotationImage.project_id == project_id,
+            AnnotationImage.is_annotated == False
+        ).count()
+    else:
+        image_count = db.query(AnnotationImage).filter(
+            AnnotationImage.project_id == project_id
+        ).count()
+
+    return {
+        "image_count": image_count,
+        "estimated_cost": vlm_provider.get_cost_estimate(image_count),
+        "provider": provider,
+        "is_free": provider == "ollama"
+    }
+
+
+@router.post("/vlm/jobs")
+async def create_vlm_job(
+    job_data: VLMJobCreate,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db)
+):
+    """Create and start a VLM auto-labeling job"""
+    from api.vlm_providers import get_vlm_provider
+
+    # Verify project exists
+    project = db.query(AnnotationProject).filter(AnnotationProject.id == job_data.project_id).first()
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    # Validate provider
+    settings = _get_vlm_settings(db)
+    try:
+        provider = get_vlm_provider(job_data.provider, settings)
+        if not provider.validate_connection():
+            raise HTTPException(
+                status_code=400,
+                detail=f"Provider '{job_data.provider}' is not available. Check configuration in Settings."
+            )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    # Count images
+    if job_data.only_unannotated:
+        image_count = db.query(AnnotationImage).filter(
+            AnnotationImage.project_id == job_data.project_id,
+            AnnotationImage.is_annotated == False
+        ).count()
+    else:
+        image_count = db.query(AnnotationImage).filter(
+            AnnotationImage.project_id == job_data.project_id
+        ).count()
+
+    if image_count == 0:
+        raise HTTPException(status_code=400, detail="No images to process")
+
+    # Validate classes
+    if not job_data.classes or len(job_data.classes) == 0:
+        raise HTTPException(status_code=400, detail="At least one class must be specified")
+
+    # Estimate cost
+    estimated_cost = provider.get_cost_estimate(image_count)
+
+    # Create job record
+    job = AutoLabelJob(
+        project_id=job_data.project_id,
+        model_path="",  # Not used for VLM
+        model_name=f"VLM: {job_data.provider}",
+        model_type="vlm",
+        vlm_provider=job_data.provider,
+        vlm_classes=job_data.classes,
+        vlm_prompt=job_data.custom_prompt,
+        confidence_threshold=job_data.confidence_threshold,
+        batch_size=job_data.batch_size,
+        only_unannotated=job_data.only_unannotated,
+        estimated_cost=estimated_cost,
+        actual_cost=0.0,
+        status="pending",
+        total_images=image_count,
+    )
+    db.add(job)
+    db.commit()
+    db.refresh(job)
+
+    # Start background task
+    background_tasks.add_task(run_vlm_autolabel_job, job.id)
+
+    return {
+        "id": job.id,
+        "status": "pending",
+        "total_images": image_count,
+        "estimated_cost": estimated_cost,
+        "provider": job_data.provider,
+        "classes": job_data.classes,
+        "message": "VLM auto-labeling job started"
+    }
+
+
+def run_vlm_autolabel_job(job_id: int):
+    """Run VLM inference on images for auto-labeling (background task)"""
+    import asyncio
+    from database import SessionLocal
+    from api.vlm_providers import get_vlm_provider, detect_with_retry
+
+    db = SessionLocal()
+    try:
+        job = db.query(AutoLabelJob).filter(AutoLabelJob.id == job_id).first()
+        if not job:
+            return
+
+        job.status = "running"
+        if not job.started_at:
+            job.started_at = datetime.utcnow()
+        db.commit()
+
+        # Get provider
+        settings = _get_vlm_settings(db)
+        provider = get_vlm_provider(job.vlm_provider, settings)
+        classes = job.vlm_classes or []
+
+        # Get images
+        if job.only_unannotated:
+            images = db.query(AnnotationImage).filter(
+                AnnotationImage.project_id == job.project_id,
+                AnnotationImage.is_annotated == False
+            ).all()
+        else:
+            images = db.query(AnnotationImage).filter(
+                AnnotationImage.project_id == job.project_id
+            ).all()
+
+        predictions_count = 0
+        total_cost = 0.0
+
+        # Create event loop for async operations
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+
+        try:
+            for idx, image in enumerate(images):
+                # Check for pause
+                if _paused_jobs.get(job_id):
+                    print(f"VLM Job {job_id} paused at image {idx}/{len(images)}")
+                    job.status = "paused"
+                    db.commit()
+                    return
+
+                try:
+                    image_path = STORAGE_PATH / image.file_path
+                    if not image_path.exists():
+                        print(f"Image not found: {image_path}")
+                        continue
+
+                    # Run VLM inference with retry
+                    response = loop.run_until_complete(
+                        detect_with_retry(provider, image_path, classes, job.vlm_prompt)
+                    )
+
+                    if response.error:
+                        print(f"VLM error on image {image.id}: {response.error}")
+                        # Continue to next image, don't fail the whole job
+                        continue
+
+                    total_cost += response.cost
+
+                    # Get project classes for mapping
+                    project_classes = {c.name.lower(): c.class_index for c in
+                        db.query(AnnotationClass).filter(AnnotationClass.project_id == job.project_id).all()}
+
+                    # Store predictions
+                    for bbox in response.bboxes:
+                        if bbox.confidence < job.confidence_threshold:
+                            continue
+
+                        # Try to map to project class (case-insensitive)
+                        class_id = project_classes.get(bbox.class_name.lower(), 0)
+
+                        prediction = AutoLabelPrediction(
+                            job_id=job_id,
+                            image_id=image.id,
+                            class_id=class_id,
+                            class_name=bbox.class_name,
+                            confidence=bbox.confidence,
+                            x_center=bbox.x_center,
+                            y_center=bbox.y_center,
+                            width=bbox.width,
+                            height=bbox.height,
+                            status="pending",
+                        )
+                        db.add(prediction)
+                        predictions_count += 1
+
+                    # Update progress
+                    job.processed_images = idx + 1
+                    job.predictions_count = predictions_count
+                    job.actual_cost = total_cost
+                    db.commit()
+
+                    # Rate limiting for cloud APIs
+                    if job.vlm_provider in ["anthropic", "openai"]:
+                        import time
+                        time.sleep(0.5)  # ~120 RPM
+
+                except Exception as e:
+                    print(f"Error processing image {image.id}: {e}")
+                    continue
+
+        finally:
+            loop.close()
+
+        job.status = "completed"
+        job.completed_at = datetime.utcnow()
+        job.actual_cost = total_cost
+        db.commit()
+
+        print(f"VLM Job {job_id} completed: {predictions_count} predictions, ${total_cost:.4f} cost")
+
+    except Exception as e:
+        import traceback
+        job = db.query(AutoLabelJob).filter(AutoLabelJob.id == job_id).first()
+        if job:
+            job.status = "failed"
+            job.error_message = f"{str(e)}\n{traceback.format_exc()}"
+            job.completed_at = datetime.utcnow()
+            db.commit()
+        print(f"VLM Job {job_id} failed: {e}")
+    finally:
+        db.close()

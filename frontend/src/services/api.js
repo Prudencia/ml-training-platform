@@ -207,13 +207,21 @@ export const autolabelAPI = {
   }),
   deletePretrainedModel: (filename) => api.delete(`/api/autolabel/pretrained-models/${filename}`),
 
-  // Jobs
+  // Jobs (YOLO)
   createJob: (data) => api.post('/api/autolabel/jobs', data),
   listJobs: (projectId = null) => api.get('/api/autolabel/jobs', { params: { project_id: projectId } }),
   getJob: (id) => api.get(`/api/autolabel/jobs/${id}`),
   deleteJob: (id) => api.delete(`/api/autolabel/jobs/${id}`),
   pauseJob: (id) => api.post(`/api/autolabel/jobs/${id}/pause`),
   resumeJob: (id) => api.post(`/api/autolabel/jobs/${id}/resume`),
+
+  // VLM (Vision Language Model) Auto-Labeling
+  getVLMProviders: () => api.get('/api/autolabel/vlm/providers'),
+  estimateVLMCost: (projectId, provider, onlyUnannotated = true) =>
+    api.get('/api/autolabel/vlm/cost-estimate', {
+      params: { project_id: projectId, provider, only_unannotated: onlyUnannotated }
+    }),
+  createVLMJob: (data) => api.post('/api/autolabel/vlm/jobs', data),
 
   // Predictions
   getPredictions: (jobId, status = null, imageId = null, page = 1, perPage = 50) =>

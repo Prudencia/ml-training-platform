@@ -55,6 +55,13 @@ function Annotate() {
   const [autoLabelLoading, setAutoLabelLoading] = useState(false)
   const [autoLabelTab, setAutoLabelTab] = useState('setup') // 'setup', 'progress', 'review'
 
+  // VLM state
+  const [modelType, setModelType] = useState('yolo') // 'yolo' or 'vlm'
+  const [vlmProviders, setVlmProviders] = useState([])
+  const [selectedVLMProvider, setSelectedVLMProvider] = useState('')
+  const [vlmClasses, setVlmClasses] = useState([])
+  const [vlmCostEstimate, setVlmCostEstimate] = useState(null)
+
   // Class mapping state
   const [projectClasses, setProjectClasses] = useState([])
   const [modelClasses, setModelClasses] = useState([])
@@ -323,16 +330,21 @@ function Annotate() {
     setAutoLabelTab('setup')
     setAutoLabelLoading(true)
     setShowAutoLabelModal(true)
+    setModelType('yolo')
+    setVlmClasses([])
+    setVlmCostEstimate(null)
 
     try {
-      // Load available models and existing jobs
-      const [modelsRes, jobsRes] = await Promise.all([
+      // Load available models, VLM providers, and existing jobs
+      const [modelsRes, jobsRes, vlmRes] = await Promise.all([
         autolabelAPI.getAvailableModels(),
-        autolabelAPI.listJobs(project.id)
+        autolabelAPI.listJobs(project.id),
+        autolabelAPI.getVLMProviders()
       ])
 
       setAvailableModels(modelsRes.data.models || [])
       setAutoLabelJobs(jobsRes.data || [])
+      setVlmProviders(vlmRes.data.providers || [])
 
       // If there's an in-progress or completed job, show it
       const activeJob = (jobsRes.data || []).find(j => j.status === 'running' || j.status === 'completed')
@@ -380,6 +392,59 @@ function Annotate() {
     } catch (error) {
       console.error('Failed to start auto-labeling:', error)
       alert('Failed to start auto-labeling: ' + (error.response?.data?.detail || error.message))
+    } finally {
+      setAutoLabelLoading(false)
+    }
+  }
+
+  // VLM-specific functions
+  const handleVLMProviderSelect = async (provider) => {
+    setSelectedVLMProvider(provider)
+    setVlmCostEstimate(null)
+
+    // Auto-select all project classes for VLM detection
+    if (projectClasses.length > 0 && vlmClasses.length === 0) {
+      setVlmClasses(projectClasses.map(c => c.name))
+    }
+
+    // Get cost estimate for cloud providers
+    if (provider && provider !== 'ollama' && selectedProject) {
+      try {
+        const res = await autolabelAPI.estimateVLMCost(selectedProject.id, provider, onlyUnannotated)
+        setVlmCostEstimate(res.data)
+      } catch (error) {
+        console.error('Failed to get cost estimate:', error)
+      }
+    }
+  }
+
+  const toggleVlmClass = (className) => {
+    if (vlmClasses.includes(className)) {
+      setVlmClasses(vlmClasses.filter(c => c !== className))
+    } else {
+      setVlmClasses([...vlmClasses, className])
+    }
+  }
+
+  const handleStartVLMAutoLabel = async () => {
+    if (!selectedProject || !selectedVLMProvider || vlmClasses.length === 0) return
+    setAutoLabelLoading(true)
+
+    try {
+      const res = await autolabelAPI.createVLMJob({
+        project_id: selectedProject.id,
+        provider: selectedVLMProvider,
+        classes: vlmClasses,
+        confidence_threshold: confidence,
+        batch_size: selectedVLMProvider === 'ollama' ? 50 : 10, // Smaller batches for cloud APIs
+        only_unannotated: onlyUnannotated
+      })
+
+      setCurrentJob(res.data)
+      setAutoLabelTab('progress')
+    } catch (error) {
+      console.error('Failed to start VLM auto-labeling:', error)
+      alert('Failed to start VLM auto-labeling: ' + (error.response?.data?.detail || error.message))
     } finally {
       setAutoLabelLoading(false)
     }
@@ -1107,30 +1172,173 @@ function Annotate() {
                 {/* Setup Tab */}
                 {autoLabelTab === 'setup' && (
                   <div className="space-y-4">
+                    {/* Model Type Toggle */}
                     <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-2">Select Model</label>
-                      {availableModels.length === 0 ? (
-                        <div className="p-4 bg-yellow-50 border border-yellow-200 rounded-lg">
-                          <p className="text-yellow-800 text-sm">
-                            No trained models found. Train a model first or use a pre-trained YOLOv5 model.
-                          </p>
-                        </div>
-                      ) : (
-                        <select
-                          value={selectedModel}
-                          onChange={(e) => setSelectedModel(e.target.value)}
-                          className="w-full border border-gray-300 rounded-md p-2"
+                      <label className="block text-sm font-medium text-gray-700 mb-2">Model Type</label>
+                      <div className="flex rounded-lg border border-gray-300 overflow-hidden">
+                        <button
+                          onClick={() => setModelType('yolo')}
+                          className={`flex-1 py-2 px-4 text-sm font-medium transition-colors ${
+                            modelType === 'yolo'
+                              ? 'bg-purple-600 text-white'
+                              : 'bg-white text-gray-700 hover:bg-gray-50'
+                          }`}
                         >
-                          <option value="">Select a model...</option>
-                          {availableModels.map((model, idx) => (
-                            <option key={idx} value={model.path}>
-                              {model.name} ({model.type})
-                            </option>
-                          ))}
-                        </select>
-                      )}
+                          YOLO Model
+                        </button>
+                        <button
+                          onClick={() => setModelType('vlm')}
+                          className={`flex-1 py-2 px-4 text-sm font-medium transition-colors ${
+                            modelType === 'vlm'
+                              ? 'bg-purple-600 text-white'
+                              : 'bg-white text-gray-700 hover:bg-gray-50'
+                          }`}
+                        >
+                          VLM (Vision AI)
+                        </button>
+                      </div>
                     </div>
 
+                    {/* YOLO Model Selection */}
+                    {modelType === 'yolo' && (
+                      <>
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-2">Select Model</label>
+                          {availableModels.length === 0 ? (
+                            <div className="p-4 bg-yellow-50 border border-yellow-200 rounded-lg">
+                              <p className="text-yellow-800 text-sm">
+                                No trained models found. Train a model first or use a pre-trained YOLOv5 model.
+                              </p>
+                            </div>
+                          ) : (
+                            <select
+                              value={selectedModel}
+                              onChange={(e) => setSelectedModel(e.target.value)}
+                              className="w-full border border-gray-300 rounded-md p-2"
+                            >
+                              <option value="">Select a model...</option>
+                              {availableModels.map((model, idx) => (
+                                <option key={idx} value={model.path}>
+                                  {model.name} ({model.type})
+                                </option>
+                              ))}
+                            </select>
+                          )}
+                        </div>
+
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-2">
+                            Batch Size: {batchSize}
+                          </label>
+                          <select
+                            value={batchSize}
+                            onChange={(e) => setBatchSize(parseInt(e.target.value))}
+                            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-purple-500"
+                          >
+                            <option value={100}>100 (fastest progress updates)</option>
+                            <option value={500}>500</option>
+                            <option value={1000}>1000 (recommended)</option>
+                            <option value={2000}>2000</option>
+                            <option value={5000}>5000 (fastest processing)</option>
+                          </select>
+                          <p className="text-xs text-gray-500 mt-1">
+                            Larger batches process faster but update progress less frequently
+                          </p>
+                        </div>
+                      </>
+                    )}
+
+                    {/* VLM Provider Selection */}
+                    {modelType === 'vlm' && (
+                      <>
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-2">Select VLM Provider</label>
+                          <div className="grid grid-cols-3 gap-3">
+                            {vlmProviders.map((provider) => (
+                              <button
+                                key={provider.name}
+                                onClick={() => handleVLMProviderSelect(provider.name)}
+                                disabled={!provider.configured}
+                                className={`p-3 rounded-lg border-2 text-center transition-all ${
+                                  selectedVLMProvider === provider.name
+                                    ? 'border-purple-600 bg-purple-50'
+                                    : provider.configured
+                                    ? 'border-gray-200 hover:border-purple-300'
+                                    : 'border-gray-200 bg-gray-50 opacity-60 cursor-not-allowed'
+                                }`}
+                              >
+                                <div className="font-medium text-sm capitalize">{provider.name}</div>
+                                <div className="text-xs mt-1">
+                                  {provider.configured ? (
+                                    provider.name === 'ollama' ? (
+                                      <span className="text-green-600">Free (Local)</span>
+                                    ) : (
+                                      <span className="text-green-600">Configured</span>
+                                    )
+                                  ) : (
+                                    <span className="text-gray-400">Not configured</span>
+                                  )}
+                                </div>
+                              </button>
+                            ))}
+                          </div>
+                          {vlmProviders.every(p => !p.configured) && (
+                            <p className="text-sm text-amber-600 mt-2">
+                              No VLM providers configured. Go to Settings to add API keys.
+                            </p>
+                          )}
+                        </div>
+
+                        {/* Cost Estimate */}
+                        {vlmCostEstimate && selectedVLMProvider !== 'ollama' && (
+                          <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">
+                            <div className="flex items-center justify-between">
+                              <span className="text-sm text-blue-800">Estimated Cost</span>
+                              <span className="font-medium text-blue-900">
+                                ${vlmCostEstimate.estimated_cost?.toFixed(2) || '0.00'}
+                              </span>
+                            </div>
+                            <p className="text-xs text-blue-600 mt-1">
+                              {vlmCostEstimate.image_count || 0} images × ${vlmCostEstimate.cost_per_image?.toFixed(4) || '0.00'}/image
+                            </p>
+                          </div>
+                        )}
+
+                        {/* Class Selection for VLM */}
+                        {selectedVLMProvider && (
+                          <div>
+                            <label className="block text-sm font-medium text-gray-700 mb-2">
+                              Classes to Detect ({vlmClasses.length} selected)
+                            </label>
+                            {projectClasses.length === 0 ? (
+                              <div className="p-3 bg-amber-50 border border-amber-200 rounded-lg">
+                                <p className="text-amber-800 text-sm">
+                                  No classes defined. Add classes to your project first.
+                                </p>
+                              </div>
+                            ) : (
+                              <div className="flex flex-wrap gap-2">
+                                {projectClasses.map((cls) => (
+                                  <button
+                                    key={cls.class_index}
+                                    onClick={() => toggleVlmClass(cls.name)}
+                                    className={`px-3 py-1.5 rounded-full text-sm font-medium transition-colors ${
+                                      vlmClasses.includes(cls.name)
+                                        ? 'bg-purple-600 text-white'
+                                        : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                                    }`}
+                                  >
+                                    {cls.name}
+                                  </button>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                        )}
+                      </>
+                    )}
+
+                    {/* Confidence Threshold (shared) */}
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-2">
                         Confidence Threshold: {(confidence * 100).toFixed(0)}%
@@ -1150,26 +1358,7 @@ function Annotate() {
                       </div>
                     </div>
 
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-2">
-                        Batch Size: {batchSize}
-                      </label>
-                      <select
-                        value={batchSize}
-                        onChange={(e) => setBatchSize(parseInt(e.target.value))}
-                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-purple-500"
-                      >
-                        <option value={100}>100 (fastest progress updates)</option>
-                        <option value={500}>500</option>
-                        <option value={1000}>1000 (recommended)</option>
-                        <option value={2000}>2000</option>
-                        <option value={5000}>5000 (fastest processing)</option>
-                      </select>
-                      <p className="text-xs text-gray-500 mt-1">
-                        Larger batches process faster but update progress less frequently
-                      </p>
-                    </div>
-
+                    {/* Only Unannotated Option (shared) */}
                     <div className="bg-gray-50 rounded-lg p-4">
                       <label className="flex items-start gap-3 cursor-pointer">
                         <input
@@ -1220,9 +1409,11 @@ function Annotate() {
                               }}
                             >
                               <div>
-                                <p className="text-sm font-medium">{job.model_name || 'Unknown model'}</p>
+                                <p className="text-sm font-medium">
+                                  {job.model_type === 'vlm' ? `VLM: ${job.vlm_provider}` : job.model_name || 'Unknown model'}
+                                </p>
                                 <p className="text-xs text-gray-500">
-                                  {new Date(job.created_at).toLocaleDateString()} - {job.total_predictions || 0} predictions
+                                  {new Date(job.created_at).toLocaleDateString()} - {job.predictions_count || 0} predictions
                                 </p>
                               </div>
                               <span className={`px-2 py-1 text-xs rounded-full ${
@@ -1247,14 +1438,25 @@ function Annotate() {
                       >
                         Cancel
                       </button>
-                      <button
-                        onClick={handleStartAutoLabel}
-                        disabled={!selectedModel || autoLabelLoading}
-                        className="flex-1 px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 disabled:opacity-50 flex items-center justify-center gap-2"
-                      >
-                        {autoLabelLoading && <Loader2 size={16} className="animate-spin" />}
-                        Start Auto-Labeling
-                      </button>
+                      {modelType === 'yolo' ? (
+                        <button
+                          onClick={handleStartAutoLabel}
+                          disabled={!selectedModel || autoLabelLoading}
+                          className="flex-1 px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 disabled:opacity-50 flex items-center justify-center gap-2"
+                        >
+                          {autoLabelLoading && <Loader2 size={16} className="animate-spin" />}
+                          Start Auto-Labeling
+                        </button>
+                      ) : (
+                        <button
+                          onClick={handleStartVLMAutoLabel}
+                          disabled={!selectedVLMProvider || vlmClasses.length === 0 || autoLabelLoading}
+                          className="flex-1 px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 disabled:opacity-50 flex items-center justify-center gap-2"
+                        >
+                          {autoLabelLoading && <Loader2 size={16} className="animate-spin" />}
+                          Start VLM Auto-Labeling
+                        </button>
+                      )}
                     </div>
                   </div>
                 )}

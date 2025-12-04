@@ -516,3 +516,157 @@ async def setup_status(db: Session = Depends(get_db)):
         "setup_required": user_count == 0,
         "auth_enabled": is_auth_enabled(db),
     }
+
+
+# ============ VLM Settings Endpoints ============
+
+@router.get("/vlm")
+async def get_vlm_settings(db: Session = Depends(get_db)):
+    """Get VLM-related settings (API keys are masked)"""
+    anthropic_key = get_setting("vlm_anthropic_api_key", db)
+    openai_key = get_setting("vlm_openai_api_key", db)
+    ollama_endpoint = get_setting("vlm_ollama_endpoint", db, default="http://localhost:11434")
+    ollama_model = get_setting("vlm_ollama_model", db, default="llava:13b")
+
+    return {
+        "anthropic": {
+            "is_configured": bool(anthropic_key),
+            "key_preview": f"...{anthropic_key[-8:]}" if anthropic_key and len(anthropic_key) > 8 else None,
+        },
+        "openai": {
+            "is_configured": bool(openai_key),
+            "key_preview": f"...{openai_key[-8:]}" if openai_key and len(openai_key) > 8 else None,
+        },
+        "ollama": {
+            "endpoint": ollama_endpoint,
+            "model": ollama_model,
+        }
+    }
+
+
+class VLMKeyUpdate(BaseModel):
+    api_key: str
+
+
+class VLMOllamaUpdate(BaseModel):
+    endpoint: Optional[str] = None
+    model: Optional[str] = None
+
+
+@router.put("/vlm/anthropic")
+async def update_anthropic_key(
+    update: VLMKeyUpdate,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_admin)
+):
+    """Update Anthropic API key (admin only when auth enabled)"""
+    key = "vlm_anthropic_api_key"
+    setting = db.query(SystemSettings).filter(SystemSettings.key == key).first()
+
+    if setting:
+        setting.value = update.api_key
+        setting.updated_at = datetime.utcnow()
+    else:
+        setting = SystemSettings(
+            key=key,
+            value=update.api_key,
+            value_type="string",
+            description="Anthropic API key for VLM auto-labeling"
+        )
+        db.add(setting)
+
+    db.commit()
+    return {"message": "Anthropic API key updated"}
+
+
+@router.put("/vlm/openai")
+async def update_openai_key(
+    update: VLMKeyUpdate,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_admin)
+):
+    """Update OpenAI API key (admin only when auth enabled)"""
+    key = "vlm_openai_api_key"
+    setting = db.query(SystemSettings).filter(SystemSettings.key == key).first()
+
+    if setting:
+        setting.value = update.api_key
+        setting.updated_at = datetime.utcnow()
+    else:
+        setting = SystemSettings(
+            key=key,
+            value=update.api_key,
+            value_type="string",
+            description="OpenAI API key for VLM auto-labeling"
+        )
+        db.add(setting)
+
+    db.commit()
+    return {"message": "OpenAI API key updated"}
+
+
+@router.put("/vlm/ollama")
+async def update_ollama_settings(
+    update: VLMOllamaUpdate,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_admin)
+):
+    """Update Ollama settings (admin only when auth enabled)"""
+    if update.endpoint is not None:
+        key = "vlm_ollama_endpoint"
+        setting = db.query(SystemSettings).filter(SystemSettings.key == key).first()
+        if setting:
+            setting.value = update.endpoint
+            setting.updated_at = datetime.utcnow()
+        else:
+            setting = SystemSettings(
+                key=key,
+                value=update.endpoint,
+                value_type="string",
+                description="Ollama API endpoint for VLM auto-labeling"
+            )
+            db.add(setting)
+
+    if update.model is not None:
+        key = "vlm_ollama_model"
+        setting = db.query(SystemSettings).filter(SystemSettings.key == key).first()
+        if setting:
+            setting.value = update.model
+            setting.updated_at = datetime.utcnow()
+        else:
+            setting = SystemSettings(
+                key=key,
+                value=update.model,
+                value_type="string",
+                description="Default Ollama model for VLM auto-labeling"
+            )
+            db.add(setting)
+
+    db.commit()
+    return {"message": "Ollama settings updated"}
+
+
+@router.delete("/vlm/{provider}")
+async def delete_vlm_key(
+    provider: str,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_admin)
+):
+    """Delete VLM provider API key (admin only when auth enabled)"""
+    key_map = {
+        "anthropic": "vlm_anthropic_api_key",
+        "openai": "vlm_openai_api_key",
+    }
+
+    if provider not in key_map:
+        raise HTTPException(status_code=400, detail="Invalid provider. Use 'anthropic' or 'openai'")
+
+    key = key_map[provider]
+    setting = db.query(SystemSettings).filter(SystemSettings.key == key).first()
+
+    if setting:
+        db.delete(setting)
+        db.commit()
+        return {"message": f"{provider} API key deleted"}
+
+    raise HTTPException(status_code=404, detail="API key not found")

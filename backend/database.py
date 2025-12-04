@@ -59,7 +59,7 @@ class AutoLabelJob(Base):
     confidence_threshold = Column(Float, default=0.25)
     batch_size = Column(Integer, default=1000)  # Number of images to process per batch
     only_unannotated = Column(Boolean, default=True)  # If True, only process unannotated images
-    status = Column(String, default="pending")  # pending, running, completed, failed
+    status = Column(String, default="pending")  # pending, running, completed, failed, paused
     total_images = Column(Integer, default=0)
     processed_images = Column(Integer, default=0)
     predictions_count = Column(Integer, default=0)
@@ -69,6 +69,14 @@ class AutoLabelJob(Base):
     completed_at = Column(DateTime, nullable=True)
     error_message = Column(Text, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
+
+    # VLM-specific fields
+    model_type = Column(String, default="yolo")  # "yolo" or "vlm"
+    vlm_provider = Column(String, nullable=True)  # "anthropic", "openai", "ollama"
+    vlm_classes = Column(JSON, nullable=True)  # Classes to detect: ["person", "car", ...]
+    vlm_prompt = Column(Text, nullable=True)  # Custom prompt override
+    estimated_cost = Column(Float, default=0.0)  # Estimated API cost (for cloud VLMs)
+    actual_cost = Column(Float, default=0.0)  # Actual API cost incurred
 
     # Relationship
     project = relationship("AnnotationProject", back_populates="auto_label_jobs")

@@ -1,0 +1,537 @@
+"""
+VLM (Vision Language Model) Provider Abstraction Layer
+
+Supports multiple VLM providers for object detection:
+- Anthropic Claude (claude-sonnet-4-20250514)
+- OpenAI GPT-4V (gpt-4o)
+- Ollama/LLaVA (local)
+"""
+
+from abc import ABC, abstractmethod
+from typing import List, Optional, Dict, Any
+from dataclasses import dataclass
+from pathlib import Path
+import base64
+import json
+import re
+import asyncio
+from datetime import datetime
+
+
+@dataclass
+class BoundingBox:
+    """Normalized bounding box in YOLO format (0-1)"""
+    class_name: str
+    x_center: float
+    y_center: float
+    width: float
+    height: float
+    confidence: float
+
+
+@dataclass
+class VLMResponse:
+    """Response from VLM inference"""
+    bboxes: List[BoundingBox]
+    raw_response: str
+    tokens_used: int
+    cost: float
+    error: Optional[str] = None
+
+
+class VLMProvider(ABC):
+    """Abstract base class for VLM providers"""
+
+    @abstractmethod
+    async def detect_objects(
+        self,
+        image_path: Path,
+        classes: List[str],
+        prompt: Optional[str] = None
+    ) -> VLMResponse:
+        """Run object detection on an image"""
+        pass
+
+    @abstractmethod
+    def get_cost_estimate(self, image_count: int) -> float:
+        """Estimate cost for processing N images"""
+        pass
+
+    @abstractmethod
+    def validate_connection(self) -> bool:
+        """Validate that API key/endpoint is configured and working"""
+        pass
+
+    def encode_image(self, image_path: Path) -> str:
+        """Encode image to base64"""
+        with open(image_path, "rb") as f:
+            return base64.standard_b64encode(f.read()).decode("utf-8")
+
+    def get_media_type(self, image_path: Path) -> str:
+        """Get MIME type for image"""
+        suffix = image_path.suffix.lower()
+        types = {
+            ".jpg": "image/jpeg",
+            ".jpeg": "image/jpeg",
+            ".png": "image/png",
+            ".gif": "image/gif",
+            ".webp": "image/webp"
+        }
+        return types.get(suffix, "image/jpeg")
+
+    def _build_system_prompt(self, classes: List[str]) -> str:
+        """Build system prompt for object detection"""
+        return f"""You are an expert object detection system. Your task is to identify and locate objects in images.
+
+OUTPUT FORMAT:
+Return ONLY a JSON array of detected objects. Each object must have:
+- "class": One of the allowed classes (exactly as written)
+- "bbox": [x_min, y_min, x_max, y_max] as percentages (0-100) of image dimensions
+- "confidence": Your confidence score (0.0-1.0)
+
+ALLOWED CLASSES: {', '.join(classes)}
+
+Example output:
+[
+  {{"class": "person", "bbox": [10.5, 20.0, 45.2, 80.0], "confidence": 0.95}},
+  {{"class": "car", "bbox": [50.0, 40.0, 90.0, 75.0], "confidence": 0.88}}
+]
+
+RULES:
+1. Only detect objects from the ALLOWED CLASSES list
+2. Be precise with bounding box coordinates
+3. Only include objects you are confident about (>0.3 confidence)
+4. If no objects are detected, return an empty array: []
+5. Return ONLY valid JSON, no explanations or other text
+6. bbox format is [x_min, y_min, x_max, y_max] where all values are percentages 0-100"""
+
+    def _build_user_prompt(self, classes: List[str]) -> str:
+        """Build user prompt for object detection"""
+        return f"Detect all instances of these objects in the image: {', '.join(classes)}. Return the results as a JSON array."
+
+    def _parse_response(self, response_text: str, classes: List[str]) -> List[BoundingBox]:
+        """Parse VLM response text into bounding boxes"""
+        # Extract JSON from response (handle markdown code blocks)
+        json_match = re.search(r'```(?:json)?\s*(\[.*?\])\s*```', response_text, re.DOTALL)
+        if json_match:
+            json_str = json_match.group(1)
+        else:
+            # Try to find raw JSON array
+            json_match = re.search(r'\[.*\]', response_text, re.DOTALL)
+            if not json_match:
+                return []
+            json_str = json_match.group()
+
+        try:
+            detections = json.loads(json_str)
+        except json.JSONDecodeError:
+            return []
+
+        bboxes = []
+        classes_lower = [c.lower() for c in classes]
+
+        for det in detections:
+            if not isinstance(det, dict):
+                continue
+
+            class_name = det.get("class", "")
+            # Case-insensitive class matching
+            if class_name.lower() not in classes_lower:
+                continue
+
+            # Use the original class name from the allowed list
+            class_idx = classes_lower.index(class_name.lower())
+            class_name = classes[class_idx]
+
+            bbox = det.get("bbox", [])
+            if len(bbox) != 4:
+                continue
+
+            try:
+                confidence = float(det.get("confidence", 0.5))
+
+                # Convert from [x_min, y_min, x_max, y_max] percentages to YOLO format
+                x_min, y_min, x_max, y_max = [float(b) / 100.0 for b in bbox]
+
+                # Calculate center and dimensions
+                x_center = (x_min + x_max) / 2
+                y_center = (y_min + y_max) / 2
+                width = x_max - x_min
+                height = y_max - y_min
+
+                # Clamp values to 0-1
+                x_center = max(0, min(1, x_center))
+                y_center = max(0, min(1, y_center))
+                width = max(0, min(1, width))
+                height = max(0, min(1, height))
+
+                if width > 0.01 and height > 0.01:  # Minimum size threshold
+                    bboxes.append(BoundingBox(
+                        class_name=class_name,
+                        x_center=x_center,
+                        y_center=y_center,
+                        width=width,
+                        height=height,
+                        confidence=confidence
+                    ))
+            except (ValueError, TypeError):
+                continue
+
+        return bboxes
+
+
+class AnthropicProvider(VLMProvider):
+    """Anthropic Claude Vision provider"""
+
+    def __init__(self, api_key: str, model: str = "claude-sonnet-4-20250514"):
+        self.api_key = api_key
+        self.model = model
+        # Pricing as of 2024 (approximate)
+        self.cost_per_input_token = 0.003 / 1000  # $3 per 1M input tokens
+        self.cost_per_output_token = 0.015 / 1000  # $15 per 1M output tokens
+
+    async def detect_objects(
+        self,
+        image_path: Path,
+        classes: List[str],
+        prompt: Optional[str] = None
+    ) -> VLMResponse:
+        try:
+            import anthropic
+        except ImportError:
+            return VLMResponse(
+                bboxes=[],
+                raw_response="",
+                tokens_used=0,
+                cost=0,
+                error="anthropic package not installed. Run: pip install anthropic"
+            )
+
+        system_prompt = self._build_system_prompt(classes)
+        user_prompt = prompt or self._build_user_prompt(classes)
+
+        image_data = self.encode_image(image_path)
+        media_type = self.get_media_type(image_path)
+
+        try:
+            client = anthropic.Anthropic(api_key=self.api_key)
+
+            response = client.messages.create(
+                model=self.model,
+                max_tokens=4096,
+                system=system_prompt,
+                messages=[{
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "image",
+                            "source": {
+                                "type": "base64",
+                                "media_type": media_type,
+                                "data": image_data
+                            }
+                        },
+                        {
+                            "type": "text",
+                            "text": user_prompt
+                        }
+                    ]
+                }]
+            )
+
+            response_text = response.content[0].text
+            bboxes = self._parse_response(response_text, classes)
+
+            input_tokens = response.usage.input_tokens
+            output_tokens = response.usage.output_tokens
+            tokens_used = input_tokens + output_tokens
+            cost = (input_tokens * self.cost_per_input_token +
+                   output_tokens * self.cost_per_output_token)
+
+            return VLMResponse(
+                bboxes=bboxes,
+                raw_response=response_text,
+                tokens_used=tokens_used,
+                cost=cost
+            )
+        except Exception as e:
+            return VLMResponse(
+                bboxes=[],
+                raw_response="",
+                tokens_used=0,
+                cost=0,
+                error=str(e)
+            )
+
+    def get_cost_estimate(self, image_count: int) -> float:
+        # Estimate ~1500 input tokens per image (image + prompt), ~300 output tokens
+        return image_count * (1500 * self.cost_per_input_token + 300 * self.cost_per_output_token)
+
+    def validate_connection(self) -> bool:
+        try:
+            import anthropic
+            client = anthropic.Anthropic(api_key=self.api_key)
+            # Simple validation - just create a minimal message
+            response = client.messages.create(
+                model=self.model,
+                max_tokens=10,
+                messages=[{"role": "user", "content": "test"}]
+            )
+            return True
+        except Exception:
+            return False
+
+
+class OpenAIProvider(VLMProvider):
+    """OpenAI GPT-4 Vision provider"""
+
+    def __init__(self, api_key: str, model: str = "gpt-4o"):
+        self.api_key = api_key
+        self.model = model
+        # Pricing as of 2024 (approximate for gpt-4o)
+        self.cost_per_input_token = 0.0025 / 1000
+        self.cost_per_output_token = 0.01 / 1000
+
+    async def detect_objects(
+        self,
+        image_path: Path,
+        classes: List[str],
+        prompt: Optional[str] = None
+    ) -> VLMResponse:
+        try:
+            from openai import OpenAI
+        except ImportError:
+            return VLMResponse(
+                bboxes=[],
+                raw_response="",
+                tokens_used=0,
+                cost=0,
+                error="openai package not installed. Run: pip install openai"
+            )
+
+        system_prompt = self._build_system_prompt(classes)
+        user_prompt = prompt or self._build_user_prompt(classes)
+
+        image_data = self.encode_image(image_path)
+        media_type = self.get_media_type(image_path)
+
+        try:
+            client = OpenAI(api_key=self.api_key)
+
+            response = client.chat.completions.create(
+                model=self.model,
+                max_tokens=4096,
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {
+                        "role": "user",
+                        "content": [
+                            {
+                                "type": "image_url",
+                                "image_url": {
+                                    "url": f"data:{media_type};base64,{image_data}"
+                                }
+                            },
+                            {"type": "text", "text": user_prompt}
+                        ]
+                    }
+                ]
+            )
+
+            response_text = response.choices[0].message.content
+            bboxes = self._parse_response(response_text, classes)
+
+            tokens_used = response.usage.total_tokens
+            cost = (response.usage.prompt_tokens * self.cost_per_input_token +
+                   response.usage.completion_tokens * self.cost_per_output_token)
+
+            return VLMResponse(
+                bboxes=bboxes,
+                raw_response=response_text,
+                tokens_used=tokens_used,
+                cost=cost
+            )
+        except Exception as e:
+            return VLMResponse(
+                bboxes=[],
+                raw_response="",
+                tokens_used=0,
+                cost=0,
+                error=str(e)
+            )
+
+    def get_cost_estimate(self, image_count: int) -> float:
+        return image_count * (1500 * self.cost_per_input_token + 300 * self.cost_per_output_token)
+
+    def validate_connection(self) -> bool:
+        try:
+            from openai import OpenAI
+            client = OpenAI(api_key=self.api_key)
+            client.models.list()
+            return True
+        except Exception:
+            return False
+
+
+class OllamaProvider(VLMProvider):
+    """Ollama local VLM provider (LLaVA, etc.)"""
+
+    def __init__(self, endpoint: str = "http://localhost:11434", model: str = "llava:13b"):
+        self.endpoint = endpoint.rstrip("/")
+        self.model = model
+
+    async def detect_objects(
+        self,
+        image_path: Path,
+        classes: List[str],
+        prompt: Optional[str] = None
+    ) -> VLMResponse:
+        try:
+            import httpx
+        except ImportError:
+            return VLMResponse(
+                bboxes=[],
+                raw_response="",
+                tokens_used=0,
+                cost=0,
+                error="httpx package not installed. Run: pip install httpx"
+            )
+
+        system_prompt = self._build_system_prompt(classes)
+        user_prompt = prompt or self._build_user_prompt(classes)
+
+        image_data = self.encode_image(image_path)
+
+        try:
+            async with httpx.AsyncClient(timeout=180.0) as client:
+                response = await client.post(
+                    f"{self.endpoint}/api/generate",
+                    json={
+                        "model": self.model,
+                        "prompt": f"{system_prompt}\n\n{user_prompt}",
+                        "images": [image_data],
+                        "stream": False,
+                        "options": {
+                            "temperature": 0.1,  # Low temp for consistent output
+                            "num_predict": 2048
+                        }
+                    }
+                )
+                response.raise_for_status()
+                data = response.json()
+
+            response_text = data.get("response", "")
+            bboxes = self._parse_response(response_text, classes)
+
+            return VLMResponse(
+                bboxes=bboxes,
+                raw_response=response_text,
+                tokens_used=data.get("eval_count", 0),
+                cost=0.0  # Local = free
+            )
+        except Exception as e:
+            return VLMResponse(
+                bboxes=[],
+                raw_response="",
+                tokens_used=0,
+                cost=0,
+                error=str(e)
+            )
+
+    def get_cost_estimate(self, image_count: int) -> float:
+        return 0.0  # Local inference is free
+
+    def validate_connection(self) -> bool:
+        try:
+            import httpx
+            response = httpx.get(f"{self.endpoint}/api/tags", timeout=10.0)
+            return response.status_code == 200
+        except Exception:
+            return False
+
+    def list_available_models(self) -> List[str]:
+        """List models available in Ollama that support vision"""
+        try:
+            import httpx
+            response = httpx.get(f"{self.endpoint}/api/tags", timeout=10.0)
+            if response.status_code == 200:
+                data = response.json()
+                vision_models = []
+                for model in data.get("models", []):
+                    name = model.get("name", "")
+                    # Filter for vision-capable models
+                    if any(v in name.lower() for v in ["llava", "bakllava", "vision", "llama3.2-vision"]):
+                        vision_models.append(name)
+                return vision_models
+        except Exception:
+            pass
+        return []
+
+
+def get_vlm_provider(provider_type: str, settings: Dict[str, Any]) -> VLMProvider:
+    """
+    Factory function to get appropriate VLM provider.
+
+    Args:
+        provider_type: One of "anthropic", "openai", "ollama"
+        settings: Dict containing API keys and endpoints
+
+    Returns:
+        Configured VLMProvider instance
+    """
+    if provider_type == "anthropic" or provider_type == "claude":
+        api_key = settings.get("vlm_anthropic_api_key")
+        if not api_key:
+            raise ValueError("Anthropic API key not configured. Set it in Settings.")
+        model = settings.get("vlm_anthropic_model", "claude-sonnet-4-20250514")
+        return AnthropicProvider(api_key=api_key, model=model)
+
+    elif provider_type == "openai" or provider_type == "gpt4v":
+        api_key = settings.get("vlm_openai_api_key")
+        if not api_key:
+            raise ValueError("OpenAI API key not configured. Set it in Settings.")
+        model = settings.get("vlm_openai_model", "gpt-4o")
+        return OpenAIProvider(api_key=api_key, model=model)
+
+    elif provider_type == "ollama":
+        endpoint = settings.get("vlm_ollama_endpoint", "http://localhost:11434")
+        model = settings.get("vlm_ollama_model", "llava:13b")
+        return OllamaProvider(endpoint=endpoint, model=model)
+
+    else:
+        raise ValueError(f"Unknown VLM provider: {provider_type}")
+
+
+async def detect_with_retry(
+    provider: VLMProvider,
+    image_path: Path,
+    classes: List[str],
+    prompt: Optional[str] = None,
+    max_retries: int = 3
+) -> VLMResponse:
+    """Detect objects with exponential backoff retry for rate limits"""
+    last_error = None
+
+    for attempt in range(max_retries):
+        response = await provider.detect_objects(image_path, classes, prompt)
+
+        if not response.error:
+            return response
+
+        last_error = response.error
+
+        # Check for rate limit errors
+        if "rate" in response.error.lower() or "429" in response.error:
+            wait_time = (2 ** attempt) * 5  # 5s, 10s, 20s
+            await asyncio.sleep(wait_time)
+        else:
+            # Non-rate-limit error, don't retry
+            break
+
+    return VLMResponse(
+        bboxes=[],
+        raw_response="",
+        tokens_used=0,
+        cost=0,
+        error=last_error
+    )
