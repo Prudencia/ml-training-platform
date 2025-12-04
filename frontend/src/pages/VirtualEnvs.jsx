@@ -1,9 +1,10 @@
 import React, { useState, useEffect, useRef } from 'react'
 import { venvsAPI } from '../services/api'
-import { Zap, Package, CheckCircle, Loader2, X, AlertCircle } from 'lucide-react'
+import { Zap, Package, CheckCircle, Loader2, X, AlertCircle, Search } from 'lucide-react'
 
 function VirtualEnvs() {
   const [venvs, setVenvs] = useState([])
+  const [searchQuery, setSearchQuery] = useState('')
   const [presets, setPresets] = useState([])
   const [showCreateModal, setShowCreateModal] = useState(false)
   const [selectedVenv, setSelectedVenv] = useState(null)
@@ -223,6 +224,13 @@ function VirtualEnvs() {
   const hasActiveSetup = Object.values(setupStatus).some(s => s.status === 'running' || s.status === 'starting' || s.status === 'failed')
   const showQuickSetup = missingPresets.length > 0 || hasActiveSetup
 
+  // Filter venvs based on search query
+  const filteredVenvs = venvs.filter(venv =>
+    venv.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+    (venv.description && venv.description.toLowerCase().includes(searchQuery.toLowerCase())) ||
+    (venv.python_version && venv.python_version.toLowerCase().includes(searchQuery.toLowerCase()))
+  )
+
   return (
     <div className="space-y-4 sm:space-y-6">
       <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-4">
@@ -233,6 +241,26 @@ function VirtualEnvs() {
         >
           Create New Venv
         </button>
+      </div>
+
+      {/* Search Bar */}
+      <div className="relative">
+        <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" size={20} />
+        <input
+          type="text"
+          placeholder="Search virtual environments by name, description, or Python version..."
+          value={searchQuery}
+          onChange={(e) => setSearchQuery(e.target.value)}
+          className="w-full pl-10 pr-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-cyan-500 focus:border-cyan-500"
+        />
+        {searchQuery && (
+          <button
+            onClick={() => setSearchQuery('')}
+            className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600"
+          >
+            <X size={18} />
+          </button>
+        )}
       </div>
 
       {/* Quick Setup Section */}
@@ -354,8 +382,13 @@ function VirtualEnvs() {
       )}
 
       {/* Venvs Grid */}
+      {filteredVenvs.length === 0 && searchQuery && (
+        <div className="bg-white rounded-lg shadow p-8 text-center">
+          <p className="text-gray-500">No virtual environments found matching "{searchQuery}"</p>
+        </div>
+      )}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-        {venvs.map((venv) => (
+        {filteredVenvs.map((venv) => (
           <div key={venv.id} className="bg-white shadow rounded-lg p-6">
             <div className="flex items-start justify-between mb-2">
               <h3 className="text-lg font-bold text-gray-900">{venv.name}</h3>

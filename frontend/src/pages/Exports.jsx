@@ -1,8 +1,10 @@
 import React, { useState, useEffect, useRef } from 'react'
+import { Search, X } from 'lucide-react'
 import { autolabelAPI } from '../services/api'
 
 const Exports = () => {
   const [exports, setExports] = useState([])
+  const [searchQuery, setSearchQuery] = useState('')
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
   const [showLogsModal, setShowLogsModal] = useState(null)
@@ -206,6 +208,21 @@ const Exports = () => {
     )
   }
 
+  // Filter exports based on search query
+  const filteredExports = exports.filter(exp =>
+    exp.job_name?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+    exp.format?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+    exp.status?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+    String(exp.id).includes(searchQuery)
+  )
+
+  // Filter pretrained models based on search query
+  const filteredModels = pretrainedModels.filter(model =>
+    model.display_name?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+    model.filename?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+    model.description?.toLowerCase().includes(searchQuery.toLowerCase())
+  )
+
   return (
     <div className="space-y-6">
       <div className="flex justify-between items-center">
@@ -216,6 +233,26 @@ const Exports = () => {
         >
           Refresh
         </button>
+      </div>
+
+      {/* Search Bar */}
+      <div className="relative">
+        <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" size={20} />
+        <input
+          type="text"
+          placeholder="Search exports and models by name, format, or status..."
+          value={searchQuery}
+          onChange={(e) => setSearchQuery(e.target.value)}
+          className="w-full pl-10 pr-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-green-500"
+        />
+        {searchQuery && (
+          <button
+            onClick={() => setSearchQuery('')}
+            className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600"
+          >
+            <X size={18} />
+          </button>
+        )}
       </div>
 
       {error && (
@@ -242,14 +279,14 @@ const Exports = () => {
               </tr>
             </thead>
             <tbody className="bg-white divide-y divide-gray-200">
-              {exports.length === 0 ? (
+              {filteredExports.length === 0 ? (
                 <tr>
                   <td colSpan="10" className="px-4 py-8 text-center text-gray-500">
-                    No exports yet. Export a model from the Training Jobs page.
+                    {searchQuery ? `No exports found matching "${searchQuery}"` : 'No exports yet. Export a model from the Training Jobs page.'}
                   </td>
                 </tr>
               ) : (
-                exports.map((exportItem) => (
+                filteredExports.map((exportItem) => (
                   <tr key={exportItem.id} className="hover:bg-gray-50">
                     <td className="px-4 py-4">
                       <div className="text-sm font-bold text-blue-600">{exportItem.id}</div>
@@ -363,17 +400,23 @@ const Exports = () => {
         </p>
 
         <div className="bg-white shadow rounded-lg overflow-hidden">
-          {pretrainedModels.length === 0 ? (
+          {filteredModels.length === 0 ? (
             <div className="p-8 text-center text-gray-500">
-              <svg className="w-12 h-12 mx-auto mb-4 text-gray-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
-              </svg>
-              <p>No pre-trained models uploaded yet.</p>
-              <p className="text-xs mt-1">Upload YOLOv5 .pt files to use them for auto-labeling.</p>
+              {searchQuery ? (
+                <p>No models found matching "{searchQuery}"</p>
+              ) : (
+                <>
+                  <svg className="w-12 h-12 mx-auto mb-4 text-gray-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
+                  </svg>
+                  <p>No pre-trained models uploaded yet.</p>
+                  <p className="text-xs mt-1">Upload YOLOv5 .pt files to use them for auto-labeling.</p>
+                </>
+              )}
             </div>
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 p-4">
-              {pretrainedModels.map((model) => (
+              {filteredModels.map((model) => (
                 <div key={model.filename} className="border rounded-lg p-4 hover:border-purple-300 transition-colors">
                   <div className="flex justify-between items-start">
                     <div className="flex-1">

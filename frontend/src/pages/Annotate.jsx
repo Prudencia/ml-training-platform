@@ -1,11 +1,12 @@
 import React, { useState, useEffect, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Plus, Trash2, FolderOpen, Download, Settings, X, Upload, Image, Wand2, Check, XCircle, Loader2, Pause, Play } from 'lucide-react'
+import { Plus, Trash2, FolderOpen, Download, Settings, X, Upload, Image, Wand2, Check, XCircle, Loader2, Pause, Play, Search } from 'lucide-react'
 import { annotationsAPI, datasetsAPI, autolabelAPI } from '../services/api'
 
 function Annotate() {
   const navigate = useNavigate()
   const [projects, setProjects] = useState([])
+  const [searchQuery, setSearchQuery] = useState('')
   const [loading, setLoading] = useState(true)
   const [showCreateModal, setShowCreateModal] = useState(false)
   const [showImportModal, setShowImportModal] = useState(false)
@@ -502,6 +503,12 @@ function Annotate() {
     )
   }
 
+  // Filter projects based on search query
+  const filteredProjects = projects.filter(project =>
+    project.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+    (project.description && project.description.toLowerCase().includes(searchQuery.toLowerCase()))
+  )
+
   return (
     <div className="space-y-4 sm:space-y-6">
       {/* Header */}
@@ -516,8 +523,32 @@ function Annotate() {
         </button>
       </div>
 
+      {/* Search Bar */}
+      <div className="relative">
+        <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" size={20} />
+        <input
+          type="text"
+          placeholder="Search projects by name or description..."
+          value={searchQuery}
+          onChange={(e) => setSearchQuery(e.target.value)}
+          className="w-full pl-10 pr-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500"
+        />
+        {searchQuery && (
+          <button
+            onClick={() => setSearchQuery('')}
+            className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600"
+          >
+            <X size={18} />
+          </button>
+        )}
+      </div>
+
       {/* Projects Grid */}
-      {projects.length === 0 ? (
+      {filteredProjects.length === 0 && searchQuery ? (
+        <div className="bg-white rounded-lg shadow p-8 text-center">
+          <p className="text-gray-500">No projects found matching "{searchQuery}"</p>
+        </div>
+      ) : projects.length === 0 ? (
         <div className="bg-white rounded-lg shadow p-8 text-center">
           <p className="text-gray-500 mb-4">No annotation projects yet</p>
           <button
@@ -529,7 +560,7 @@ function Annotate() {
         </div>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-          {projects.map((project) => {
+          {filteredProjects.map((project) => {
             const progress = project.total_images > 0
               ? Math.round((project.annotated_images / project.total_images) * 100)
               : 0
