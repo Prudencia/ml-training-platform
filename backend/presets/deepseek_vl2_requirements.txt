@@ -1,13 +1,5 @@
 # DeepSeek-VL2 requirements
 # DeepSeek's Mixture-of-Experts Vision-Language Model
-# Requires custom package from GitHub
+# Install ONLY from GitHub - it includes all pinned dependencies
 
-torch>=2.0.0
-transformers>=4.40.0
-Pillow>=10.0.0
-accelerate>=0.25.0
-attrdict
-einops
-
-# Install DeepSeek-VL2 package from GitHub
 git+https://github.com/deepseek-ai/DeepSeek-VL2.git
