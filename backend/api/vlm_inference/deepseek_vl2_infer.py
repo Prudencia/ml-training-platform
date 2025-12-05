@@ -3,6 +3,8 @@
 DeepSeek-VL2 inference script - run via subprocess from venv
 Input: JSON on stdin with image_path, classes, model
 Output: JSON on stdout with detections
+
+Requires: pip install git+https://github.com/deepseek-ai/DeepSeek-VL2.git
 """
 import sys
 import json
@@ -81,29 +83,31 @@ def parse_detections(response_text: str, classes: list):
 
 
 def run_inference(image_path: str, classes: list, model_name: str):
-    """Run DeepSeek-VL2 inference"""
+    """Run DeepSeek-VL2 inference using official DeepSeek package"""
     try:
-        from transformers import AutoProcessor, AutoModelForCausalLM
-        from PIL import Image
         import torch
+        from PIL import Image
+        from transformers import AutoModelForCausalLM
+        from deepseek_vl2.models import DeepseekVLV2Processor, DeepseekVLV2ForCausalLM
     except ImportError as e:
-        return {"error": f"Missing dependencies: {e}"}
+        return {"error": f"Missing dependencies. Install with: pip install git+https://github.com/deepseek-ai/DeepSeek-VL2.git\nError: {e}"}
 
     try:
-        # Load model
-        device = "cuda" if torch.cuda.is_available() else "cpu"
-        dtype = torch.bfloat16 if torch.cuda.is_available() else torch.float32
+        # Load processor and model
+        vl_chat_processor = DeepseekVLV2Processor.from_pretrained(model_name)
+        tokenizer = vl_chat_processor.tokenizer
 
-        processor = AutoProcessor.from_pretrained(model_name, trust_remote_code=True)
-        model = AutoModelForCausalLM.from_pretrained(
+        # Load model with trust_remote_code
+        vl_gpt = AutoModelForCausalLM.from_pretrained(
             model_name,
-            torch_dtype=dtype,
             trust_remote_code=True,
-            device_map="auto" if torch.cuda.is_available() else None
+            torch_dtype=torch.bfloat16 if torch.cuda.is_available() else torch.float32,
         )
 
-        if not torch.cuda.is_available():
-            model = model.to(device)
+        if torch.cuda.is_available():
+            vl_gpt = vl_gpt.to(torch.bfloat16).cuda().eval()
+        else:
+            vl_gpt = vl_gpt.eval()
 
         # Load image
         image = Image.open(image_path).convert("RGB")
@@ -119,40 +123,48 @@ Return a JSON array:
 
 If no objects found, return: []"""
 
-        # DeepSeek-VL2 uses chat format
-        messages = [
+        # DeepSeek-VL2 conversation format
+        conversation = [
             {
-                "role": "user",
-                "content": [
-                    {"type": "image", "image": image},
-                    {"type": "text", "text": detection_prompt}
-                ]
-            }
+                "role": "<|User|>",
+                "content": f"<image>\n{detection_prompt}",
+                "images": [image],
+            },
+            {"role": "<|Assistant|>", "content": ""},
         ]
 
-        inputs = processor(messages, return_tensors="pt")
-        device = next(model.parameters()).device
-        inputs = {k: v.to(device) if hasattr(v, 'to') else v for k, v in inputs.items()}
-
-        with torch.no_grad():
-            generated_ids = model.generate(
-                **inputs,
-                max_new_tokens=1024,
-                do_sample=False,
-                temperature=0.1
-            )
-
-        input_len = inputs.get("input_ids", torch.tensor([])).shape[-1] if "input_ids" in inputs else 0
-        generated_text = processor.decode(
-            generated_ids[0][input_len:],
-            skip_special_tokens=True
+        # Prepare inputs
+        pil_images = [image]
+        prepare_inputs = vl_chat_processor(
+            conversations=conversation,
+            images=pil_images,
+            force_batchify=True,
+            system_prompt=""
         )
 
+        if torch.cuda.is_available():
+            prepare_inputs = prepare_inputs.to(vl_gpt.device)
+
+        # Generate
+        with torch.no_grad():
+            inputs_embeds = vl_gpt.prepare_inputs_embeds(**prepare_inputs)
+            outputs = vl_gpt.language.generate(
+                inputs_embeds=inputs_embeds,
+                attention_mask=prepare_inputs.attention_mask,
+                pad_token_id=tokenizer.eos_token_id,
+                bos_token_id=tokenizer.bos_token_id,
+                eos_token_id=tokenizer.eos_token_id,
+                max_new_tokens=512,
+                do_sample=False,
+                use_cache=True,
+            )
+
+        generated_text = tokenizer.decode(outputs[0], skip_special_tokens=True)
         detections = parse_detections(generated_text, classes)
 
         return {
             "detections": detections,
-            "tokens_used": len(generated_ids[0]),
+            "tokens_used": len(outputs[0]),
             "raw_response": generated_text[:500]
         }
 
