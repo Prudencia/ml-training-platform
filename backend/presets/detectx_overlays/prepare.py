@@ -11,23 +11,20 @@ def get_chip_name(platform):
     return platform_mapping.get(platform.upper(), "axis-a8-dlpu-tflite")
 
 def get_video_dimensions(image_size):
+    # Use 16:9 resolutions that are widely supported by modern Axis cameras
+    # The video capture resolution should be >= model input size
+    # Common 16:9 resolutions: 640x360, 1280x720 (720p), 1920x1080 (1080p)
     video_mapping = {
-        480: 640,
-        640: 800,  # New mapping for 640
-        768: 1024,
-        960: 1280,
-        1440: 1920,
+        480: (640, 480),      # 4:3 - legacy, may not work on all cameras
+        640: (1280, 720),     # 720p - widely supported 16:9
+        768: (1280, 720),     # 720p
+        960: (1920, 1080),    # 1080p
+        1440: (1920, 1080),   # 1080p
     }
-    video_height_mapping = {
-        640: 600  # Special case for height when image_size is 640
-    }
-    
-    # Get video width from mapping or default to 640
-    video_width = video_mapping.get(image_size, 640)
-    
-    # Get video height from special mapping or use image_size as default
-    video_height = video_height_mapping.get(image_size, image_size)
-    
+
+    # Default to 720p if size not in mapping
+    video_width, video_height = video_mapping.get(image_size, (1280, 720))
+
     return video_width, video_height
 
 def parse_labels_file(file_path):
@@ -42,6 +39,16 @@ def parse_labels_file(file_path):
 def generate_json(platform="A8", image_size=480, objectness=0.25, nms=0.05, confidence=0.30):
     # Get video dimensions
     video_width, video_height = get_video_dimensions(image_size)
+
+    # Determine aspect ratio based on video dimensions
+    if video_width == 1920 and video_height == 1080:
+        video_aspect = "16:9"
+    elif video_width == 1280 and video_height == 720:
+        video_aspect = "16:9"
+    elif video_width == 640 and video_height == 480:
+        video_aspect = "4:3"
+    else:
+        video_aspect = "16:9"  # Default to 16:9 for modern cameras
 
     # Default values
     data = {
@@ -58,7 +65,7 @@ def generate_json(platform="A8", image_size=480, objectness=0.25, nms=0.05, conf
         "scaleMode": 0,
         "videoWidth": video_width,
         "videoHeight": video_height,
-        "videoAspect": "4:3",
+        "videoAspect": video_aspect,
         "chip": get_chip_name(platform),
         "labels": ["label1", "label2"],
         "description": ""
