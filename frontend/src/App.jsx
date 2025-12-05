@@ -1,6 +1,6 @@
 import React, { useState } from 'react'
 import { BrowserRouter as Router, Routes, Route, Link, useLocation } from 'react-router-dom'
-import { LayoutDashboard, Camera, Dumbbell, ListOrdered, Download, Database, Package, Settings, Terminal as TerminalIcon, Box, PenTool, Coffee, Brain } from 'lucide-react'
+import { LayoutDashboard, Camera, Dumbbell, ListOrdered, Download, Database, Package, Settings, Terminal as TerminalIcon, Box, PenTool, Coffee, Brain, FileText } from 'lucide-react'
 import Dashboard from './pages/Dashboard'
 import TrainingJobs from './pages/TrainingJobs'
 import Datasets from './pages/Datasets'
@@ -16,6 +16,7 @@ import Annotate from './pages/Annotate'
 import AnnotateProject from './pages/AnnotateProject'
 import VLM from './pages/VLM'
 import Support from './pages/Support'
+import SystemLogs from './pages/SystemLogs'
 
 const navLinks = [
   { to: '/', icon: LayoutDashboard, label: 'Dashboard', className: 'text-gray-600 hover:text-gray-900', borderColor: 'border-gray-600' },
@@ -30,6 +31,7 @@ const navLinks = [
   { to: '/vlm', icon: Brain, label: 'VLM', className: 'text-violet-600 hover:text-violet-800', borderColor: 'border-violet-600' },
   { to: '/presets', icon: Settings, label: 'Presets', className: 'text-pink-600 hover:text-pink-800', borderColor: 'border-pink-600' },
   { to: '/terminal', icon: TerminalIcon, label: 'Terminal', className: 'text-red-600 hover:text-red-800', borderColor: 'border-red-600' },
+  { to: '/logs', icon: FileText, label: 'Logs', className: 'text-slate-600 hover:text-slate-800', borderColor: 'border-slate-600' },
 ]
 
 function Navigation() {
@@ -154,6 +156,7 @@ function App() {
             <Route path="/presets" element={<Presets />} />
             <Route path="/terminal" element={<Terminal />} />
             <Route path="/support" element={<Support />} />
+            <Route path="/logs" element={<SystemLogs />} />
           </Routes>
         </main>
       </div>

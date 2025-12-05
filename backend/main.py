@@ -18,7 +18,8 @@ from api import (
     annotations,
     autolabel,
     settings,
-    vlm_management
+    vlm_management,
+    system_logs
 )
 from database import init_db
 
@@ -71,6 +72,7 @@ app.include_router(annotations.router, prefix="/api/annotations", tags=["annotat
 app.include_router(autolabel.router, prefix="/api/autolabel", tags=["autolabel"])
 app.include_router(settings.router, prefix="/api/settings", tags=["settings"])
 app.include_router(vlm_management.router, prefix="/api/vlm", tags=["vlm"])
+app.include_router(system_logs.router)  # prefix already set in router
 
 # Serve static files from frontend build
 frontend_dist = Path(__file__).parent.parent / "frontend" / "dist"
