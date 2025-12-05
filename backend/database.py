@@ -136,7 +136,8 @@ class TrainingJob(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     name = Column(String, index=True)
-    venv_id = Column(Integer)
+    venv_id = Column(Integer, nullable=True)  # Deprecated: kept for backwards compat
+    venv_name = Column(String, nullable=True)  # Stable reference by name (e.g., "axis_yolov5")
     dataset_id = Column(Integer)
     config_path = Column(String)
     status = Column(String)  # pending, running, paused, completed, failed, queued
@@ -352,6 +353,29 @@ def _run_migrations():
         except Exception as e:
             # Table doesn't exist yet, will be created by create_all
             print(f"Migration check skipped: {e}")
+
+        # Add venv_name to training_jobs if missing
+        try:
+            result = conn.execute(text("PRAGMA table_info(training_jobs)"))
+            existing_columns = {row[1] for row in result.fetchall()}
+
+            if "venv_name" not in existing_columns:
+                conn.execute(text("ALTER TABLE training_jobs ADD COLUMN venv_name VARCHAR"))
+                conn.commit()
+                print("Added column venv_name to training_jobs")
+
+            # Populate venv_name for existing jobs that don't have it
+            conn.execute(text("""
+                UPDATE training_jobs
+                SET venv_name = (
+                    SELECT name FROM virtual_environments
+                    WHERE virtual_environments.id = training_jobs.venv_id
+                )
+                WHERE venv_name IS NULL AND venv_id IS NOT NULL
+            """))
+            conn.commit()
+        except Exception as e:
+            print(f"Training jobs migration check skipped: {e}")
 
 
 def get_db():
