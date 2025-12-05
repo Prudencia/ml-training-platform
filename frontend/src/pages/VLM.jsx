@@ -637,6 +637,74 @@ function VLM() {
               })}
             </div>
           </div>
+
+          {/* Florence-2 Section */}
+          {(() => {
+            const florence2 = getProviderByName('florence2')
+            return florence2 ? (
+              <div className="bg-white rounded-lg shadow p-6">
+                <div className="flex items-center justify-between mb-4">
+                  <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 bg-blue-100 rounded-lg flex items-center justify-center">
+                      <Brain className="text-blue-600" size={24} />
+                    </div>
+                    <div>
+                      <h2 className="text-lg font-semibold flex items-center gap-2">
+                        Florence-2 (Local)
+                        <span className="px-2 py-0.5 bg-green-100 text-green-700 text-xs rounded-full flex items-center gap-1">
+                          <Zap size={10} /> Free
+                        </span>
+                      </h2>
+                      <p className="text-sm text-gray-500">Microsoft's vision model with native object detection</p>
+                    </div>
+                  </div>
+                  {florence2.is_available ? (
+                    <span className="px-3 py-1 bg-green-100 text-green-700 rounded-full text-sm font-medium">
+                      Available
+                    </span>
+                  ) : (
+                    <span className="px-3 py-1 bg-amber-100 text-amber-700 rounded-full text-sm font-medium">
+                      Packages Missing
+                    </span>
+                  )}
+                </div>
+
+                <div className="space-y-3">
+                  {florence2.is_available ? (
+                    <>
+                      <p className="text-sm text-gray-600">
+                        Florence-2 is ready to use. Select it as a provider when running auto-labeling jobs.
+                        The model will be downloaded on first use (~0.5-1.5GB depending on variant).
+                      </p>
+                      <div className="bg-gray-50 rounded-lg p-3">
+                        <p className="text-xs font-medium text-gray-700 mb-2">Available models:</p>
+                        <div className="grid grid-cols-2 gap-2">
+                          {florence2.models?.map(model => (
+                            <div key={model} className="text-xs text-gray-600 font-mono bg-white rounded px-2 py-1">
+                              {model.replace('microsoft/', '')}
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                      <p className="text-xs text-gray-500">
+                        Unlike Ollama models, Florence-2 runs directly with PyTorch. No separate service required.
+                      </p>
+                    </>
+                  ) : (
+                    <div className="bg-amber-50 border border-amber-200 rounded-lg p-3">
+                      <p className="text-sm text-amber-800">
+                        Florence-2 requires <code className="bg-amber-100 px-1 rounded">transformers</code> and{' '}
+                        <code className="bg-amber-100 px-1 rounded">torch</code> packages.
+                      </p>
+                      <p className="text-xs text-amber-700 mt-2">
+                        Install with: <code className="bg-amber-100 px-1 rounded">pip install transformers torch</code>
+                      </p>
+                    </div>
+                  )}
+                </div>
+              </div>
+            ) : null
+          })()}
         </div>
       )}
 
@@ -964,7 +1032,7 @@ function VLM() {
               <li>. Cloud providers charge per image processed (costs shown above)</li>
               <li>. NVIDIA NIM offers 1000 free credits for new users</li>
               <li>. API keys are stored securely and never shared</li>
-              <li>. For free unlimited processing, use Ollama with local models</li>
+              <li>. For free unlimited processing, use Ollama or Florence-2 with local models</li>
               <li>. Cloud providers typically have higher accuracy than local models</li>
             </ul>
           </div>

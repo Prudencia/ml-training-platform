@@ -1352,6 +1352,22 @@ async def get_vlm_providers(db: Session = Depends(get_db)):
         "estimated_cost_per_image": 0.002
     })
 
+    # Florence-2 (local)
+    from api.vlm_providers import Florence2Provider
+    florence2_available = Florence2Provider.is_available()
+    providers.append({
+        "name": "florence2",
+        "display_name": "Florence-2 (Local)",
+        "provider_type": "local",
+        "is_configured": True,  # No API key needed
+        "is_available": florence2_available,
+        "models": ["microsoft/Florence-2-base", "microsoft/Florence-2-large",
+                   "microsoft/Florence-2-base-ft", "microsoft/Florence-2-large-ft"],
+        "default_model": "microsoft/Florence-2-base",
+        "estimated_cost_per_image": 0.0,
+        "description": "Microsoft's vision model with native object detection. Downloads model on first use (~0.5-1.5GB)."
+    })
+
     return {"providers": providers}
 
 
