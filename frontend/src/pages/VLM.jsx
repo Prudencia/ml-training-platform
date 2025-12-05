@@ -659,46 +659,127 @@ function VLM() {
                     </div>
                   </div>
                   {florence2.is_available ? (
-                    <span className="px-3 py-1 bg-green-100 text-green-700 rounded-full text-sm font-medium">
-                      Available
+                    <span className="px-3 py-1 bg-green-100 text-green-700 rounded-full text-sm font-medium flex items-center gap-1">
+                      <Check size={14} /> Ready
                     </span>
                   ) : (
                     <span className="px-3 py-1 bg-amber-100 text-amber-700 rounded-full text-sm font-medium">
-                      Packages Missing
+                      Setup Required
                     </span>
                   )}
                 </div>
 
-                <div className="space-y-3">
+                <div className="space-y-4">
                   {florence2.is_available ? (
                     <>
-                      <p className="text-sm text-gray-600">
-                        Florence-2 is ready to use. Select it as a provider when running auto-labeling jobs.
-                        The model will be downloaded on first use (~0.5-1.5GB depending on variant).
-                      </p>
-                      <div className="bg-gray-50 rounded-lg p-3">
-                        <p className="text-xs font-medium text-gray-700 mb-2">Available models:</p>
-                        <div className="grid grid-cols-2 gap-2">
-                          {florence2.models?.map(model => (
-                            <div key={model} className="text-xs text-gray-600 font-mono bg-white rounded px-2 py-1">
-                              {model.replace('microsoft/', '')}
+                      <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">
+                        <p className="text-sm text-blue-800">
+                          Florence-2 is ready! Select it as provider when running auto-labeling.
+                          Models download automatically on first use.
+                        </p>
+                      </div>
+
+                      {/* Model List */}
+                      <div>
+                        <h3 className="text-sm font-semibold text-gray-700 mb-3">Available Models</h3>
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                          {florence2.models_detailed?.map(model => (
+                            <div
+                              key={model.name}
+                              className={`p-3 rounded-lg border-2 ${
+                                model.recommended ? 'border-purple-200 bg-purple-50' : 'border-gray-200 bg-gray-50'
+                              }`}
+                            >
+                              <div className="flex items-start justify-between mb-1">
+                                <span className="font-medium text-sm">{model.display_name}</span>
+                                {model.recommended && (
+                                  <span className="px-2 py-0.5 bg-purple-100 text-purple-700 text-xs rounded-full">
+                                    Recommended
+                                  </span>
+                                )}
+                              </div>
+                              <p className="text-xs text-gray-600 mb-2">{model.description}</p>
+                              <div className="flex gap-3 text-xs text-gray-500">
+                                <span className="flex items-center gap-1">
+                                  <HardDrive size={12} /> {model.size_gb} GB
+                                </span>
+                                <span className="flex items-center gap-1">
+                                  <Cpu size={12} /> {model.vram_gb} GB VRAM
+                                </span>
+                                <span>{model.params} params</span>
+                              </div>
                             </div>
                           ))}
                         </div>
                       </div>
-                      <p className="text-xs text-gray-500">
-                        Unlike Ollama models, Florence-2 runs directly with PyTorch. No separate service required.
-                      </p>
+
+                      <div className="text-xs text-gray-500 space-y-1">
+                        <p>• Florence-2 uses native object detection - no prompt engineering needed</p>
+                        <p>• Runs on GPU if available, falls back to CPU</p>
+                        <p>• Model files are cached in HuggingFace cache directory</p>
+                      </div>
                     </>
                   ) : (
-                    <div className="bg-amber-50 border border-amber-200 rounded-lg p-3">
-                      <p className="text-sm text-amber-800">
-                        Florence-2 requires <code className="bg-amber-100 px-1 rounded">transformers</code> and{' '}
-                        <code className="bg-amber-100 px-1 rounded">torch</code> packages.
-                      </p>
-                      <p className="text-xs text-amber-700 mt-2">
-                        Install with: <code className="bg-amber-100 px-1 rounded">pip install transformers torch</code>
-                      </p>
+                    <div className="space-y-4">
+                      <div className="bg-amber-50 border border-amber-200 rounded-lg p-4">
+                        <div className="flex items-start gap-3">
+                          <AlertCircle className="text-amber-600 flex-shrink-0 mt-0.5" size={20} />
+                          <div>
+                            <p className="text-sm font-medium text-amber-800">Dependencies not installed</p>
+                            <p className="text-sm text-amber-700 mt-1">
+                              Florence-2 requires PyTorch and Transformers packages.
+                            </p>
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="bg-gray-50 rounded-lg p-4">
+                        <p className="text-sm font-medium text-gray-700 mb-2">Installation Instructions</p>
+                        <div className="space-y-2">
+                          <div>
+                            <p className="text-xs text-gray-500 mb-1">For Docker (rebuild required):</p>
+                            <code className="block bg-gray-100 p-2 rounded text-xs font-mono">
+                              docker compose build --no-cache backend
+                            </code>
+                          </div>
+                          <div>
+                            <p className="text-xs text-gray-500 mb-1">For manual installation:</p>
+                            <code className="block bg-gray-100 p-2 rounded text-xs font-mono">
+                              pip install torch transformers timm einops
+                            </code>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Show model list even when not installed */}
+                      <div>
+                        <h3 className="text-sm font-semibold text-gray-700 mb-3">Available Models (after install)</h3>
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-3 opacity-75">
+                          {[
+                            { display_name: "Florence-2 Base", params: "232M", size_gb: 0.5, vram_gb: 2, description: "Fast and lightweight", recommended: true },
+                            { display_name: "Florence-2 Large", params: "771M", size_gb: 1.5, vram_gb: 4, description: "Higher accuracy", recommended: false },
+                            { display_name: "Florence-2 Base FT", params: "232M", size_gb: 0.5, vram_gb: 2, description: "Fine-tuned base", recommended: false },
+                            { display_name: "Florence-2 Large FT", params: "771M", size_gb: 1.5, vram_gb: 4, description: "Best accuracy", recommended: false },
+                          ].map(model => (
+                            <div key={model.display_name} className="p-3 rounded-lg border border-gray-200 bg-white">
+                              <div className="flex items-start justify-between mb-1">
+                                <span className="font-medium text-sm text-gray-600">{model.display_name}</span>
+                                {model.recommended && (
+                                  <span className="px-2 py-0.5 bg-gray-100 text-gray-500 text-xs rounded-full">
+                                    Recommended
+                                  </span>
+                                )}
+                              </div>
+                              <p className="text-xs text-gray-500 mb-2">{model.description}</p>
+                              <div className="flex gap-3 text-xs text-gray-400">
+                                <span>{model.size_gb} GB</span>
+                                <span>{model.vram_gb} GB VRAM</span>
+                                <span>{model.params}</span>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
                     </div>
                   )}
                 </div>

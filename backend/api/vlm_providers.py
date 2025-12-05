@@ -707,12 +707,48 @@ class Florence2Provider(VLMProvider):
 
     @staticmethod
     def list_models() -> List[Dict[str, Any]]:
-        """List available Florence-2 models"""
+        """List available Florence-2 models with detailed information"""
         return [
-            {"name": "microsoft/Florence-2-base", "size": "0.5GB", "description": "Base model, faster"},
-            {"name": "microsoft/Florence-2-large", "size": "1.5GB", "description": "Large model, more accurate"},
-            {"name": "microsoft/Florence-2-base-ft", "size": "0.5GB", "description": "Fine-tuned base"},
-            {"name": "microsoft/Florence-2-large-ft", "size": "1.5GB", "description": "Fine-tuned large"},
+            {
+                "name": "microsoft/Florence-2-base",
+                "display_name": "Florence-2 Base",
+                "params": "232M",
+                "size_gb": 0.5,
+                "vram_gb": 2,
+                "description": "Fast and lightweight. Good for quick labeling tasks.",
+                "recommended": True,
+                "category": "efficient"
+            },
+            {
+                "name": "microsoft/Florence-2-large",
+                "display_name": "Florence-2 Large",
+                "params": "771M",
+                "size_gb": 1.5,
+                "vram_gb": 4,
+                "description": "Higher accuracy for complex scenes. Best detection quality.",
+                "recommended": False,
+                "category": "accurate"
+            },
+            {
+                "name": "microsoft/Florence-2-base-ft",
+                "display_name": "Florence-2 Base Fine-tuned",
+                "params": "232M",
+                "size_gb": 0.5,
+                "vram_gb": 2,
+                "description": "Fine-tuned on additional data. Better generalization.",
+                "recommended": False,
+                "category": "efficient"
+            },
+            {
+                "name": "microsoft/Florence-2-large-ft",
+                "display_name": "Florence-2 Large Fine-tuned",
+                "params": "771M",
+                "size_gb": 1.5,
+                "vram_gb": 4,
+                "description": "Best overall accuracy. Fine-tuned large model.",
+                "recommended": False,
+                "category": "accurate"
+            },
         ]
 
 
