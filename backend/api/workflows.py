@@ -1094,13 +1094,14 @@ async def get_detectx_config():
         "platforms": [
             {"value": "A8", "label": "ARTPEC-8 DLPU", "chip": "axis-a8-dlpu-tflite"},
             {"value": "A9", "label": "ARTPEC-9 DLPU", "chip": "a9-dlpu-tflite"},
-            {"value": "TPU", "label": "Google Edge TPU", "chip": "google-edge-tpu-tflite"}
+            {"value": "TPU", "label": "Google Edge TPU", "chip": "google-edge-tpu-tflite"},
+            {"value": "CPU", "label": "CPU (slower, for debugging)", "chip": "cpu-tflite"}
         ],
         "image_sizes": [
-            {"value": 480, "label": "480x480", "video": "640x480"},
-            {"value": 640, "label": "640x640", "video": "800x600"},
-            {"value": 960, "label": "960x960", "video": "1280x960"},
-            {"value": 1440, "label": "1440x1440", "video": "1920x1440"}
+            {"value": 480, "label": "480x480", "video": "640x480 (4:3)"},
+            {"value": 640, "label": "640x640", "video": "1280x720 (16:9)"},
+            {"value": 960, "label": "960x960", "video": "1920x1080 (16:9)"},
+            {"value": 1440, "label": "1440x1440", "video": "1920x1080 (16:9)"}
         ],
         "default_vendor": "Custom",
         "default_vendor_url": "https://example.com"

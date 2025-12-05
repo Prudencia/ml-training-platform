@@ -6,7 +6,8 @@ def get_chip_name(platform):
     platform_mapping = {
         "A8": "axis-a8-dlpu-tflite",
         "A9": "a9-dlpu-tflite",
-        "TPU": "google-edge-tpu-tflite"
+        "TPU": "google-edge-tpu-tflite",
+        "CPU": "cpu-tflite"  # CPU fallback for debugging DLPU issues
     }
     return platform_mapping.get(platform.upper(), "axis-a8-dlpu-tflite")
 
