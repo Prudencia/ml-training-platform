@@ -306,6 +306,22 @@ PRESET_VENVS = {
         "apply_axis_patch": False,
         "custom_requirements": "presets/detectx_requirements.txt",
         "overlay_dir": "presets/detectx_overlays"  # Files to copy over cloned repo
+    },
+    "florence2": {
+        "name": "florence2",
+        "description": "Florence-2 local VLM (Microsoft's vision model with native object detection)",
+        "github_repo": None,
+        "apply_axis_patch": False,
+        "custom_requirements": "presets/florence2_requirements.txt",
+        "category": "vlm"
+    },
+    "deepseek_vl2": {
+        "name": "deepseek_vl2",
+        "description": "DeepSeek-VL2 local VLM (Mixture-of-Experts vision-language model)",
+        "github_repo": None,
+        "apply_axis_patch": False,
+        "custom_requirements": "presets/deepseek_vl2_requirements.txt",
+        "category": "vlm"
     }
 }
 

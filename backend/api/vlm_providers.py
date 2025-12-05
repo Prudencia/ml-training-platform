@@ -504,52 +504,17 @@ class OllamaProvider(VLMProvider):
 
 
 class Florence2Provider(VLMProvider):
-    """Florence-2 local VLM provider using HuggingFace transformers"""
+    """Florence-2 local VLM provider - runs via venv subprocess"""
 
-    # Class-level model cache
-    _model = None
-    _processor = None
-    _model_name = None
+    VENV_PATH = Path("storage/venvs/florence2")
+    INFERENCE_SCRIPT = Path("api/vlm_inference/florence2_infer.py")
 
     def __init__(self, model: str = "microsoft/Florence-2-base"):
         self.model = model
-        # Available models:
-        # - microsoft/Florence-2-base (~0.5GB)
-        # - microsoft/Florence-2-large (~1.5GB)
-        # - microsoft/Florence-2-base-ft (fine-tuned)
-        # - microsoft/Florence-2-large-ft (fine-tuned)
 
-    def _load_model(self):
-        """Load model and processor (cached at class level)"""
-        if Florence2Provider._model is not None and Florence2Provider._model_name == self.model:
-            return Florence2Provider._model, Florence2Provider._processor
-
-        try:
-            from transformers import AutoProcessor, AutoModelForCausalLM
-            import torch
-        except ImportError:
-            raise ImportError("transformers and torch packages required. Run: pip install transformers torch")
-
-        print(f"Loading Florence-2 model: {self.model}")
-
-        # Determine device
-        device = "cuda" if torch.cuda.is_available() else "cpu"
-        dtype = torch.float16 if torch.cuda.is_available() else torch.float32
-
-        processor = AutoProcessor.from_pretrained(self.model, trust_remote_code=True)
-        model = AutoModelForCausalLM.from_pretrained(
-            self.model,
-            torch_dtype=dtype,
-            trust_remote_code=True
-        ).to(device)
-
-        # Cache at class level
-        Florence2Provider._model = model
-        Florence2Provider._processor = processor
-        Florence2Provider._model_name = self.model
-
-        print(f"Florence-2 loaded on {device}")
-        return model, processor
+    def _get_python_bin(self) -> Path:
+        """Get Python binary from venv"""
+        return self.VENV_PATH / "bin" / "python"
 
     async def detect_objects(
         self,
@@ -557,153 +522,105 @@ class Florence2Provider(VLMProvider):
         classes: List[str],
         prompt: Optional[str] = None
     ) -> VLMResponse:
-        try:
-            from PIL import Image
-            import torch
-        except ImportError:
+        import subprocess
+
+        if not self.is_available():
             return VLMResponse(
                 bboxes=[],
                 raw_response="",
                 tokens_used=0,
                 cost=0,
-                error="PIL and torch packages required"
+                error="Florence-2 venv not installed. Install it from the Venvs page."
             )
+
+        python_bin = self._get_python_bin()
+
+        # Prepare input
+        input_data = json.dumps({
+            "image_path": str(image_path),
+            "classes": classes,
+            "model": self.model
+        })
 
         try:
-            model, processor = self._load_model()
-            device = next(model.parameters()).device
-
-            # Load image
-            image = Image.open(image_path).convert("RGB")
-            img_width, img_height = image.size
-
-            # Use open vocabulary detection with class names
-            # Task: <OPEN_VOCABULARY_DETECTION> with text prompt of classes
-            task = "<OPEN_VOCABULARY_DETECTION>"
-            class_prompt = ", ".join(classes)
-            text_input = f"{task}{class_prompt}"
-
-            # Process inputs
-            inputs = processor(
-                text=text_input,
-                images=image,
-                return_tensors="pt"
-            ).to(device)
-
-            # Generate
-            with torch.no_grad():
-                generated_ids = model.generate(
-                    input_ids=inputs["input_ids"],
-                    pixel_values=inputs["pixel_values"],
-                    max_new_tokens=1024,
-                    num_beams=3,
-                    do_sample=False
-                )
-
-            # Decode response
-            generated_text = processor.batch_decode(generated_ids, skip_special_tokens=False)[0]
-
-            # Post-process to get structured output
-            parsed = processor.post_process_generation(
-                generated_text,
-                task=task,
-                image_size=(img_width, img_height)
+            # Run inference via subprocess
+            result = subprocess.run(
+                [str(python_bin), str(self.INFERENCE_SCRIPT)],
+                input=input_data,
+                capture_output=True,
+                text=True,
+                timeout=300  # 5 min timeout
             )
 
-            print(f"Florence-2 raw output: {parsed}")
+            if result.returncode != 0:
+                return VLMResponse(
+                    bboxes=[],
+                    raw_response="",
+                    tokens_used=0,
+                    cost=0,
+                    error=f"Inference failed: {result.stderr}"
+                )
 
-            # Extract bounding boxes
-            bboxes = []
-            result = parsed.get(task, {})
+            output = json.loads(result.stdout)
 
-            bbox_list = result.get("bboxes", [])
-            label_list = result.get("bboxes_labels", result.get("labels", []))
+            if "error" in output:
+                return VLMResponse(
+                    bboxes=[],
+                    raw_response="",
+                    tokens_used=0,
+                    cost=0,
+                    error=output["error"]
+                )
 
-            # Match labels to our classes (case-insensitive)
-            classes_lower = [c.lower() for c in classes]
-
-            for i, (bbox, label) in enumerate(zip(bbox_list, label_list)):
-                # Florence-2 returns absolute pixel coordinates [x1, y1, x2, y2]
-                if len(bbox) != 4:
-                    continue
-
-                x1, y1, x2, y2 = bbox
-
-                # Check if label matches any of our classes
-                label_lower = label.lower().strip()
-                matched_class = None
-                for j, cls in enumerate(classes_lower):
-                    if cls in label_lower or label_lower in cls:
-                        matched_class = classes[j]
-                        break
-
-                if matched_class is None:
-                    # Try exact match
-                    if label_lower in classes_lower:
-                        matched_class = classes[classes_lower.index(label_lower)]
-                    else:
-                        continue
-
-                # Convert to normalized YOLO format
-                x_center = ((x1 + x2) / 2) / img_width
-                y_center = ((y1 + y2) / 2) / img_height
-                width = (x2 - x1) / img_width
-                height = (y2 - y1) / img_height
-
-                # Clamp to 0-1
-                x_center = max(0, min(1, x_center))
-                y_center = max(0, min(1, y_center))
-                width = max(0, min(1, width))
-                height = max(0, min(1, height))
-
-                if width > 0.01 and height > 0.01:
-                    bboxes.append(BoundingBox(
-                        class_name=matched_class,
-                        x_center=x_center,
-                        y_center=y_center,
-                        width=width,
-                        height=height,
-                        confidence=0.9  # Florence-2 doesn't output confidence
-                    ))
+            # Convert detections to BoundingBox objects
+            bboxes = [
+                BoundingBox(
+                    class_name=d["class_name"],
+                    x_center=d["x_center"],
+                    y_center=d["y_center"],
+                    width=d["width"],
+                    height=d["height"],
+                    confidence=d["confidence"]
+                )
+                for d in output.get("detections", [])
+            ]
 
             return VLMResponse(
                 bboxes=bboxes,
-                raw_response=str(parsed),
-                tokens_used=len(generated_ids[0]),
-                cost=0.0  # Local = free
+                raw_response=output.get("raw_response", ""),
+                tokens_used=output.get("tokens_used", 0),
+                cost=0.0
             )
 
-        except Exception as e:
-            import traceback
+        except subprocess.TimeoutExpired:
             return VLMResponse(
                 bboxes=[],
                 raw_response="",
                 tokens_used=0,
                 cost=0,
-                error=f"{str(e)}\n{traceback.format_exc()}"
+                error="Inference timed out (>5 min)"
+            )
+        except Exception as e:
+            return VLMResponse(
+                bboxes=[],
+                raw_response="",
+                tokens_used=0,
+                cost=0,
+                error=str(e)
             )
 
     def get_cost_estimate(self, image_count: int) -> float:
         return 0.0  # Local inference is free
 
     def validate_connection(self) -> bool:
-        """Check if model can be loaded"""
-        try:
-            self._load_model()
-            return True
-        except Exception as e:
-            print(f"Florence-2 validation failed: {e}")
-            return False
+        """Check if venv is installed"""
+        return self.is_available()
 
     @staticmethod
     def is_available() -> bool:
-        """Check if required packages are installed"""
-        try:
-            import transformers
-            import torch
-            return True
-        except ImportError:
-            return False
+        """Check if Florence-2 venv is installed"""
+        venv_python = Florence2Provider.VENV_PATH / "bin" / "python"
+        return venv_python.exists()
 
     @staticmethod
     def list_models() -> List[Dict[str, Any]]:
@@ -746,6 +663,162 @@ class Florence2Provider(VLMProvider):
                 "size_gb": 1.5,
                 "vram_gb": 4,
                 "description": "Best overall accuracy. Fine-tuned large model.",
+                "recommended": False,
+                "category": "accurate"
+            },
+        ]
+
+
+class DeepSeekVL2Provider(VLMProvider):
+    """DeepSeek-VL2 local VLM provider - runs via venv subprocess"""
+
+    VENV_PATH = Path("storage/venvs/deepseek_vl2")
+    INFERENCE_SCRIPT = Path("api/vlm_inference/deepseek_vl2_infer.py")
+
+    def __init__(self, model: str = "deepseek-ai/deepseek-vl2-tiny"):
+        self.model = model
+
+    def _get_python_bin(self) -> Path:
+        """Get Python binary from venv"""
+        return self.VENV_PATH / "bin" / "python"
+
+    async def detect_objects(
+        self,
+        image_path: Path,
+        classes: List[str],
+        prompt: Optional[str] = None
+    ) -> VLMResponse:
+        import subprocess
+
+        if not self.is_available():
+            return VLMResponse(
+                bboxes=[],
+                raw_response="",
+                tokens_used=0,
+                cost=0,
+                error="DeepSeek-VL2 venv not installed. Install it from the Venvs page."
+            )
+
+        python_bin = self._get_python_bin()
+
+        # Prepare input
+        input_data = json.dumps({
+            "image_path": str(image_path),
+            "classes": classes,
+            "model": self.model
+        })
+
+        try:
+            # Run inference via subprocess
+            result = subprocess.run(
+                [str(python_bin), str(self.INFERENCE_SCRIPT)],
+                input=input_data,
+                capture_output=True,
+                text=True,
+                timeout=300  # 5 min timeout
+            )
+
+            if result.returncode != 0:
+                return VLMResponse(
+                    bboxes=[],
+                    raw_response="",
+                    tokens_used=0,
+                    cost=0,
+                    error=f"Inference failed: {result.stderr}"
+                )
+
+            output = json.loads(result.stdout)
+
+            if "error" in output:
+                return VLMResponse(
+                    bboxes=[],
+                    raw_response="",
+                    tokens_used=0,
+                    cost=0,
+                    error=output["error"]
+                )
+
+            # Convert detections to BoundingBox objects
+            bboxes = [
+                BoundingBox(
+                    class_name=d["class_name"],
+                    x_center=d["x_center"],
+                    y_center=d["y_center"],
+                    width=d["width"],
+                    height=d["height"],
+                    confidence=d["confidence"]
+                )
+                for d in output.get("detections", [])
+            ]
+
+            return VLMResponse(
+                bboxes=bboxes,
+                raw_response=output.get("raw_response", ""),
+                tokens_used=output.get("tokens_used", 0),
+                cost=0.0
+            )
+
+        except subprocess.TimeoutExpired:
+            return VLMResponse(
+                bboxes=[],
+                raw_response="",
+                tokens_used=0,
+                cost=0,
+                error="Inference timed out (>5 min)"
+            )
+        except Exception as e:
+            return VLMResponse(
+                bboxes=[],
+                raw_response="",
+                tokens_used=0,
+                cost=0,
+                error=str(e)
+            )
+
+    def get_cost_estimate(self, image_count: int) -> float:
+        return 0.0  # Local inference is free
+
+    def validate_connection(self) -> bool:
+        """Check if venv is installed"""
+        return self.is_available()
+
+    @staticmethod
+    def is_available() -> bool:
+        """Check if DeepSeek-VL2 venv is installed"""
+        venv_python = DeepSeekVL2Provider.VENV_PATH / "bin" / "python"
+        return venv_python.exists()
+
+    @staticmethod
+    def list_models() -> List[Dict[str, Any]]:
+        """List available DeepSeek-VL2 models with detailed information"""
+        return [
+            {
+                "name": "deepseek-ai/deepseek-vl2-tiny",
+                "display_name": "DeepSeek-VL2 Tiny",
+                "params": "3.37B (1B active)",
+                "size_gb": 7,
+                "vram_gb": 8,
+                "description": "Compact MoE model. Fits most consumer GPUs with 8GB+ VRAM.",
+                "recommended": True,
+                "category": "efficient"
+            },
+            {
+                "name": "deepseek-ai/deepseek-vl2-small",
+                "display_name": "DeepSeek-VL2 Small",
+                "params": "16B (2.8B active)",
+                "size_gb": 32,
+                "vram_gb": 40,
+                "description": "Balanced accuracy and efficiency. Requires 40GB+ VRAM.",
+                "recommended": False,
+                "category": "balanced"
+            },
+            {
+                "name": "deepseek-ai/deepseek-vl2",
+                "display_name": "DeepSeek-VL2",
+                "params": "27B (4.5B active)",
+                "size_gb": 54,
+                "vram_gb": 80,
+                "description": "Full model. Best accuracy. Requires 80GB+ VRAM (A100/H100).",
                 "recommended": False,
                 "category": "accurate"
             },
@@ -900,6 +973,10 @@ def get_vlm_provider(provider_type: str, settings: Dict[str, Any], model_overrid
     elif provider_type == "florence2" or provider_type == "florence-2":
         model = model_override or settings.get("vlm_florence2_model", "microsoft/Florence-2-base")
         return Florence2Provider(model=model)
+
+    elif provider_type == "deepseek" or provider_type == "deepseek-vl2":
+        model = model_override or settings.get("vlm_deepseek_model", "deepseek-ai/deepseek-vl2-tiny")
+        return DeepSeekVL2Provider(model=model)
 
     else:
         raise ValueError(f"Unknown VLM provider: {provider_type}")

@@ -1,0 +1,8 @@
+# Florence-2 VLM requirements
+# Microsoft's vision model with native object detection
+
+torch>=2.0.0
+transformers>=4.40.0
+timm>=0.9.0
+einops>=0.7.0
+Pillow>=10.0.0

@@ -1,0 +1,7 @@
+# DeepSeek-VL2 requirements
+# DeepSeek's Mixture-of-Experts Vision-Language Model
+
+torch>=2.0.0
+transformers>=4.40.0
+Pillow>=10.0.0
+accelerate>=0.25.0

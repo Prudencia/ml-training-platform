@@ -1369,6 +1369,23 @@ async def get_vlm_providers(db: Session = Depends(get_db)):
         "description": "Microsoft's vision model with native object detection. Downloads model on first use."
     })
 
+    # DeepSeek-VL2 (local)
+    from api.vlm_providers import DeepSeekVL2Provider
+    deepseek_available = DeepSeekVL2Provider.is_available()
+    deepseek_models = DeepSeekVL2Provider.list_models()
+    providers.append({
+        "name": "deepseek",
+        "display_name": "DeepSeek-VL2 (Local)",
+        "provider_type": "local",
+        "is_configured": True,  # No API key needed
+        "is_available": deepseek_available,
+        "models": [m["name"] for m in deepseek_models],
+        "models_detailed": deepseek_models,
+        "default_model": "deepseek-ai/deepseek-vl2-tiny",
+        "estimated_cost_per_image": 0.0,
+        "description": "DeepSeek's MoE vision model. Tiny version fits 8GB+ VRAM."
+    })
+
     return {"providers": providers}
 
 
@@ -1403,7 +1420,7 @@ async def estimate_vlm_cost(
         "image_count": image_count,
         "estimated_cost": vlm_provider.get_cost_estimate(image_count),
         "provider": provider,
-        "is_free": provider == "ollama"
+        "is_free": provider in ["ollama", "florence2", "deepseek"]
     }
 
 
