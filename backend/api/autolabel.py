@@ -1339,6 +1339,19 @@ async def get_vlm_providers(db: Session = Depends(get_db)):
         "endpoint": ollama_endpoint
     })
 
+    # NVIDIA NIM
+    nvidia_key = settings.get("vlm_nvidia_api_key")
+    providers.append({
+        "name": "nvidia",
+        "display_name": "NVIDIA NIM",
+        "provider_type": "cloud",
+        "is_configured": bool(nvidia_key),
+        "is_available": bool(nvidia_key),
+        "models": ["microsoft/phi-3.5-vision-instruct", "meta/llama-3.2-90b-vision-instruct"],
+        "default_model": "microsoft/phi-3.5-vision-instruct",
+        "estimated_cost_per_image": 0.002
+    })
+
     return {"providers": providers}
 
 

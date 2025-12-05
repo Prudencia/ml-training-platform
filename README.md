@@ -49,7 +49,10 @@ A comprehensive web-based platform for managing machine learning training workfl
 ### Model Export & Deployment
 - **TFLite Export**: Convert trained models to TensorFlow Lite format with INT8 quantization
 - **Axis YOLOv5 Workflow**: Specialized support for Axis camera-optimized YOLOv5 (ReLU6 activation)
-- **DetectX ACAP Builder**: Generate ACAP packages (.eap) for deployment on Axis network cameras (ARTPEC-8/9)
+- **DetectX ACAP Builder**: Generate ACAP packages (.eap) for deployment on Axis network cameras
+  - ARTPEC-8 DLPU, ARTPEC-9 DLPU, Google Edge TPU support
+  - CPU fallback option for debugging DLPU issues
+  - Configurable detection thresholds (objectness, confidence, NMS)
 
 ### Monitoring & Tools
 - **System Dashboard**: Real-time CPU, GPU, memory, and disk usage monitoring
