@@ -631,15 +631,19 @@ async def export_model(export_req: ExportRequest, db: Session = Depends(get_db))
 
     # Determine which venv to use (override or training job's venv)
     if export_req.venv_id:
-        # Use specified venv for export
+        # Use specified venv for export (by ID)
         venv = db.query(VirtualEnvironment).filter(VirtualEnvironment.id == export_req.venv_id).first()
         if not venv:
             raise HTTPException(status_code=404, detail="Specified virtual environment not found")
     else:
-        # Fall back to training job's venv
-        venv = db.query(VirtualEnvironment).filter(VirtualEnvironment.id == job.venv_id).first()
+        # Try to find venv by name first (stable across reinstalls), then fall back to ID
+        venv = None
+        if job.venv_name:
+            venv = db.query(VirtualEnvironment).filter(VirtualEnvironment.name == job.venv_name).first()
+        if not venv and job.venv_id:
+            venv = db.query(VirtualEnvironment).filter(VirtualEnvironment.id == job.venv_id).first()
         if not venv:
-            raise HTTPException(status_code=404, detail="Training job's virtual environment not found")
+            raise HTTPException(status_code=404, detail=f"Virtual environment not found (name={job.venv_name}, id={job.venv_id}). Please reinstall the venv.")
 
     venv_path = Path(venv.path).resolve()
     python_bin = venv_path / "bin" / "python" if os.name != 'nt' else venv_path / "Scripts" / "python.exe"
