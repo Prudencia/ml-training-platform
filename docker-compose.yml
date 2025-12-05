@@ -25,6 +25,7 @@ services:
     volumes:
       - ./backend/storage:/app/storage
       - ./backend/database:/app/database
+      - /var/run/docker.sock:/var/run/docker.sock  # For DetectX ACAP builds
     environment:
       - PYTHONUNBUFFERED=1
       - OLLAMA_HOST=http://ollama:11434

@@ -31,6 +31,9 @@ RUN apt-get update && apt-get install -y \
     liblzma-dev \
     && rm -rf /var/lib/apt/lists/*
 
+# Install Docker CLI for DetectX ACAP builds
+RUN curl -fsSL https://get.docker.com | sh
+
 # Install pyenv and Python 3.9.19 for axis_yolov5 compatibility
 ENV PYENV_ROOT=/root/.pyenv
 ENV PATH=$PYENV_ROOT/bin:$PYENV_ROOT/shims:$PATH
