@@ -296,7 +296,8 @@ PRESET_VENVS = {
         "github_repo": "https://github.com/ultralytics/yolov5",
         "apply_axis_patch": True,
         "python_version": "3.9",  # TensorFlow 2.11 requires Python 3.9
-        "custom_requirements": "presets/axis_yolov5_requirements.txt"
+        "custom_requirements": "presets/axis_yolov5_requirements.txt",
+        "overlay_dir": "presets/axis_yolov5_overlays"  # TF export fix for ReLU6
     },
     "DetectX": {
         "name": "DetectX",
@@ -449,17 +450,22 @@ def run_setup_in_background(preset_name: str, config: dict, log_file: Path):
                 )
                 log("Repository cloned successfully")
 
-                # Apply overlay files if configured
+                # Apply overlay files if configured (supports nested directory structure)
                 overlay_dir = config.get("overlay_dir")
                 if overlay_dir:
                     overlay_path = Path(overlay_dir)
                     if overlay_path.exists():
                         log(f"Applying overlay files from {overlay_dir}...")
-                        for overlay_file in overlay_path.iterdir():
+                        # Walk through all files in overlay directory, preserving structure
+                        for overlay_file in overlay_path.rglob("*"):
                             if overlay_file.is_file():
-                                dest_file = repo_path / overlay_file.name
+                                # Compute relative path from overlay root
+                                rel_path = overlay_file.relative_to(overlay_path)
+                                dest_file = repo_path / rel_path
+                                # Create parent directories if needed
+                                dest_file.parent.mkdir(parents=True, exist_ok=True)
                                 shutil.copy2(overlay_file, dest_file)
-                                log(f"  Applied: {overlay_file.name}")
+                                log(f"  Applied: {rel_path}")
                         log("Overlays applied successfully")
             except subprocess.CalledProcessError as e:
                 log(f"ERROR: Failed to clone repo: {e.stderr}")
