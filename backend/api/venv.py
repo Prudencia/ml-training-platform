@@ -303,7 +303,8 @@ PRESET_VENVS = {
         "description": "DetectX ACAP builder for Axis cameras",
         "github_repo": "https://github.com/pandosme/DetectX.git",
         "apply_axis_patch": False,
-        "custom_requirements": "presets/detectx_requirements.txt"
+        "custom_requirements": "presets/detectx_requirements.txt",
+        "overlay_dir": "presets/detectx_overlays"  # Files to copy over cloned repo
     }
 }
 
@@ -447,6 +448,19 @@ def run_setup_in_background(preset_name: str, config: dict, log_file: Path):
                     text=True
                 )
                 log("Repository cloned successfully")
+
+                # Apply overlay files if configured
+                overlay_dir = config.get("overlay_dir")
+                if overlay_dir:
+                    overlay_path = Path(overlay_dir)
+                    if overlay_path.exists():
+                        log(f"Applying overlay files from {overlay_dir}...")
+                        for overlay_file in overlay_path.iterdir():
+                            if overlay_file.is_file():
+                                dest_file = repo_path / overlay_file.name
+                                shutil.copy2(overlay_file, dest_file)
+                                log(f"  Applied: {overlay_file.name}")
+                        log("Overlays applied successfully")
             except subprocess.CalledProcessError as e:
                 log(f"ERROR: Failed to clone repo: {e.stderr}")
                 shutil.rmtree(venv_path)
