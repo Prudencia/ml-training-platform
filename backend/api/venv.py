@@ -454,8 +454,9 @@ def run_setup_in_background(preset_name: str, config: dict, log_file: Path):
                 overlay_dir = config.get("overlay_dir")
                 if overlay_dir:
                     overlay_path = Path(overlay_dir)
+                    log(f"Looking for overlay at: {overlay_path.absolute()}")
                     if overlay_path.exists():
-                        log(f"Applying overlay files from {overlay_dir}...")
+                        log(f"Overlay directory found! Applying overlay files...")
                         # Walk through all files in overlay directory, preserving structure
                         for overlay_file in overlay_path.rglob("*"):
                             if overlay_file.is_file():
@@ -467,6 +468,8 @@ def run_setup_in_background(preset_name: str, config: dict, log_file: Path):
                                 shutil.copy2(overlay_file, dest_file)
                                 log(f"  Applied: {rel_path}")
                         log("Overlays applied successfully")
+                    else:
+                        log(f"WARNING: Overlay directory NOT found at {overlay_path.absolute()}")
             except subprocess.CalledProcessError as e:
                 log(f"ERROR: Failed to clone repo: {e.stderr}")
                 shutil.rmtree(venv_path)
