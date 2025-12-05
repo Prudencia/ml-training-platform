@@ -1,5 +1,8 @@
 # DeepSeek-VL2 requirements
 # DeepSeek's Mixture-of-Experts Vision-Language Model
-# Install ONLY from GitHub - it includes all pinned dependencies
+# Install from GitHub - it includes all pinned dependencies
+
+# Pin numpy<2 because DeepSeek uses older torch/torchvision compiled against numpy 1.x
+numpy<2
 
 git+https://github.com/deepseek-ai/DeepSeek-VL2.git

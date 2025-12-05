@@ -558,10 +558,30 @@ class Florence2Provider(VLMProvider):
                     raw_response="",
                     tokens_used=0,
                     cost=0,
-                    error=f"Inference failed: {result.stderr}"
+                    error=f"Inference failed: {result.stderr or result.stdout}"
                 )
 
-            output = json.loads(result.stdout)
+            # Parse JSON output - handle empty or non-JSON responses
+            stdout = result.stdout.strip()
+            if not stdout:
+                return VLMResponse(
+                    bboxes=[],
+                    raw_response="",
+                    tokens_used=0,
+                    cost=0,
+                    error=f"Empty response from inference. stderr: {result.stderr}"
+                )
+
+            try:
+                output = json.loads(stdout)
+            except json.JSONDecodeError as e:
+                return VLMResponse(
+                    bboxes=[],
+                    raw_response="",
+                    tokens_used=0,
+                    cost=0,
+                    error=f"Invalid JSON from inference: {e}. stdout: {stdout[:500]}, stderr: {result.stderr[:500] if result.stderr else 'none'}"
+                )
 
             if "error" in output:
                 return VLMResponse(
@@ -724,10 +744,30 @@ class DeepSeekVL2Provider(VLMProvider):
                     raw_response="",
                     tokens_used=0,
                     cost=0,
-                    error=f"Inference failed: {result.stderr}"
+                    error=f"Inference failed: {result.stderr or result.stdout}"
                 )
 
-            output = json.loads(result.stdout)
+            # Parse JSON output - handle empty or non-JSON responses
+            stdout = result.stdout.strip()
+            if not stdout:
+                return VLMResponse(
+                    bboxes=[],
+                    raw_response="",
+                    tokens_used=0,
+                    cost=0,
+                    error=f"Empty response from inference. stderr: {result.stderr}"
+                )
+
+            try:
+                output = json.loads(stdout)
+            except json.JSONDecodeError as e:
+                return VLMResponse(
+                    bboxes=[],
+                    raw_response="",
+                    tokens_used=0,
+                    cost=0,
+                    error=f"Invalid JSON from inference: {e}. stdout: {stdout[:500]}, stderr: {result.stderr[:500] if result.stderr else 'none'}"
+                )
 
             if "error" in output:
                 return VLMResponse(
