@@ -180,10 +180,14 @@ function VLM() {
   }
 
   const handleDeleteModel = async (modelName) => {
-    // Find the actual installed model name (could be llava:latest when we asked for llava:7b)
-    const installedModel = installedModels.find(m =>
-      m.name === modelName || m.name === modelName.split(':')[0] + ':latest'
-    )
+    // Find the actual installed model name
+    // Only match :latest if the model name has no specific tag
+    const modelHasTag = modelName.includes(':')
+    const installedModel = installedModels.find(m => {
+      if (m.name === modelName) return true
+      if (!modelHasTag && m.name === modelName + ':latest') return true
+      return false
+    })
     const actualModelName = installedModel?.name || modelName
 
     if (!confirm(`Delete model "${actualModelName}"? This cannot be undone.`)) return
@@ -543,7 +547,17 @@ function VLM() {
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               {filteredModels.map((model) => {
-                const isInstalled = installedModels.some(m => m.name === model.name || m.name === model.name.split(':')[0] + ':latest')
+                // Check if model is installed:
+                // - Exact match (e.g., llava:7b === llava:7b)
+                // - Model without tag matches :latest (e.g., llama3.2-vision matches llama3.2-vision:latest)
+                // - But llama3.2-vision:90b should NOT match llama3.2-vision:latest
+                const modelHasTag = model.name.includes(':')
+                const isInstalled = installedModels.some(m => {
+                  if (m.name === model.name) return true
+                  // Only match :latest if the available model has no specific tag
+                  if (!modelHasTag && m.name === model.name + ':latest') return true
+                  return false
+                })
                 const pullStatus = pullingModels[model.name]
                 const isPulling = pullStatus && (pullStatus.status === 'pulling' || pullStatus.status === 'starting' || pullStatus.status === 'verifying')
 
