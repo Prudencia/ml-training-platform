@@ -690,10 +690,14 @@ class Florence2Provider(VLMProvider):
 
 
 class DeepSeekVL2Provider(VLMProvider):
-    """DeepSeek-VL2 local VLM provider - runs via venv subprocess"""
+    """DeepSeek-VL2 local VLM provider - uses persistent server to keep model loaded"""
 
     VENV_PATH = Path("storage/venvs/deepseek_vl2")
     INFERENCE_SCRIPT = Path("api/vlm_inference/deepseek_vl2_infer.py")
+    BATCH_INFERENCE_SCRIPT = Path("api/vlm_inference/deepseek_vl2_batch_infer.py")
+    SERVER_SCRIPT = Path("api/vlm_inference/deepseek_vl2_server.py")
+    SERVER_PORT = 8765
+    _server_process = None  # Class-level server process
 
     def __init__(self, model: str = "deepseek-ai/deepseek-vl2-tiny"):
         self.model = model
@@ -702,13 +706,197 @@ class DeepSeekVL2Provider(VLMProvider):
         """Get Python binary from venv"""
         return self.VENV_PATH / "bin" / "python"
 
+    @classmethod
+    def _is_server_running(cls) -> bool:
+        """Check if inference server is running"""
+        try:
+            import httpx
+            response = httpx.get(f"http://localhost:{cls.SERVER_PORT}/health", timeout=2.0)
+            return response.status_code == 200
+        except:
+            return False
+
+    @classmethod
+    def _start_server(cls, model: str = "deepseek-ai/deepseek-vl2-tiny"):
+        """Start the inference server if not running"""
+        import subprocess
+        import time
+
+        if cls._is_server_running():
+            return True
+
+        python_bin = cls.VENV_PATH / "bin" / "python"
+        if not python_bin.exists():
+            return False
+
+        # Kill any existing server on the port
+        try:
+            import httpx
+            httpx.post(f"http://localhost:{cls.SERVER_PORT}/shutdown", timeout=2.0)
+        except:
+            pass
+
+        # Start new server process
+        print(f"Starting DeepSeek-VL2 server on port {cls.SERVER_PORT}...")
+        cls._server_process = subprocess.Popen(
+            [str(python_bin), str(cls.SERVER_SCRIPT), "--port", str(cls.SERVER_PORT), "--model", model],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            start_new_session=True
+        )
+
+        # Wait for server to be ready (up to 5 minutes for model loading)
+        for i in range(300):
+            time.sleep(1)
+            if cls._is_server_running():
+                print(f"DeepSeek-VL2 server ready after {i+1}s")
+                return True
+            # Check if process died
+            if cls._server_process.poll() is not None:
+                stderr = cls._server_process.stderr.read().decode() if cls._server_process.stderr else ""
+                print(f"Server process died: {stderr[:500]}")
+                return False
+
+        print("Timeout waiting for DeepSeek-VL2 server")
+        return False
+
+    @classmethod
+    def stop_server(cls):
+        """Stop the inference server"""
+        if cls._server_process:
+            cls._server_process.terminate()
+            cls._server_process = None
+
+    async def detect_objects_batch(
+        self,
+        image_paths: List[Path],
+        classes: List[str],
+        prompt: Optional[str] = None
+    ) -> List[VLMResponse]:
+        """Process multiple images in a single model load - much faster"""
+        import subprocess
+
+        if not self.is_available():
+            return [VLMResponse(
+                bboxes=[],
+                raw_response="",
+                tokens_used=0,
+                cost=0,
+                error="DeepSeek-VL2 venv not installed. Install it from the Venvs page."
+            ) for _ in image_paths]
+
+        python_bin = self._get_python_bin()
+
+        input_data = json.dumps({
+            "image_paths": [str(p) for p in image_paths],
+            "classes": classes,
+            "model": self.model
+        })
+
+        try:
+            result = subprocess.run(
+                [str(python_bin), str(self.BATCH_INFERENCE_SCRIPT)],
+                input=input_data,
+                capture_output=True,
+                text=True,
+                timeout=1800  # 30 min timeout for batch
+            )
+
+            if result.returncode != 0:
+                return [VLMResponse(
+                    bboxes=[],
+                    raw_response="",
+                    tokens_used=0,
+                    cost=0,
+                    error=f"Batch inference failed: {result.stderr or result.stdout}"
+                ) for _ in image_paths]
+
+            stdout = result.stdout.strip()
+            if not stdout:
+                return [VLMResponse(
+                    bboxes=[],
+                    raw_response="",
+                    tokens_used=0,
+                    cost=0,
+                    error="Empty response from batch inference"
+                ) for _ in image_paths]
+
+            try:
+                output = json.loads(stdout)
+            except json.JSONDecodeError as e:
+                return [VLMResponse(
+                    bboxes=[],
+                    raw_response="",
+                    tokens_used=0,
+                    cost=0,
+                    error=f"Invalid JSON: {e}. stdout: {stdout[:500]}"
+                ) for _ in image_paths]
+
+            if "error" in output:
+                return [VLMResponse(
+                    bboxes=[],
+                    raw_response="",
+                    tokens_used=0,
+                    cost=0,
+                    error=output["error"]
+                ) for _ in image_paths]
+
+            # Convert results
+            responses = []
+            for r in output.get("results", []):
+                if "error" in r:
+                    responses.append(VLMResponse(
+                        bboxes=[],
+                        raw_response="",
+                        tokens_used=0,
+                        cost=0,
+                        error=r["error"]
+                    ))
+                else:
+                    bboxes = [
+                        BoundingBox(
+                            class_name=d["class_name"],
+                            x_center=d["x_center"],
+                            y_center=d["y_center"],
+                            width=d["width"],
+                            height=d["height"],
+                            confidence=d["confidence"]
+                        )
+                        for d in r.get("detections", [])
+                    ]
+                    responses.append(VLMResponse(
+                        bboxes=bboxes,
+                        raw_response=r.get("raw_response", ""),
+                        tokens_used=r.get("tokens_used", 0),
+                        cost=0.0
+                    ))
+
+            return responses
+
+        except subprocess.TimeoutExpired:
+            return [VLMResponse(
+                bboxes=[],
+                raw_response="",
+                tokens_used=0,
+                cost=0,
+                error="Batch inference timed out"
+            ) for _ in image_paths]
+        except Exception as e:
+            return [VLMResponse(
+                bboxes=[],
+                raw_response="",
+                tokens_used=0,
+                cost=0,
+                error=str(e)
+            ) for _ in image_paths]
+
     async def detect_objects(
         self,
         image_path: Path,
         classes: List[str],
         prompt: Optional[str] = None
     ) -> VLMResponse:
-        import subprocess
+        import httpx
 
         if not self.is_available():
             return VLMResponse(
@@ -719,92 +907,47 @@ class DeepSeekVL2Provider(VLMProvider):
                 error="DeepSeek-VL2 venv not installed. Install it from the Venvs page."
             )
 
-        python_bin = self._get_python_bin()
+        # Start server if not running (model stays loaded after first call)
+        if not self._is_server_running():
+            print("DeepSeek-VL2 server not running, starting it...")
+            if not self._start_server(self.model):
+                return VLMResponse(
+                    bboxes=[],
+                    raw_response="",
+                    tokens_used=0,
+                    cost=0,
+                    error="Failed to start DeepSeek-VL2 inference server"
+                )
 
-        # Prepare input
-        input_data = json.dumps({
-            "image_path": str(image_path),
-            "classes": classes,
-            "model": self.model
-        })
-
+        # Call server for inference
         try:
-            # Run inference via subprocess
-            result = subprocess.run(
-                [str(python_bin), str(self.INFERENCE_SCRIPT)],
-                input=input_data,
-                capture_output=True,
-                text=True,
-                timeout=300  # 5 min timeout
-            )
-
-            if result.returncode != 0:
-                return VLMResponse(
-                    bboxes=[],
-                    raw_response="",
-                    tokens_used=0,
-                    cost=0,
-                    error=f"Inference failed: {result.stderr or result.stdout}"
+            async with httpx.AsyncClient(timeout=120.0) as client:
+                response = await client.post(
+                    f"http://localhost:{self.SERVER_PORT}/inference",
+                    json={
+                        "image_path": str(image_path),
+                        "classes": classes
+                    }
                 )
 
-            # Parse JSON output - handle empty or non-JSON responses
-            stdout = result.stdout.strip()
-            if not stdout:
-                return VLMResponse(
-                    bboxes=[],
-                    raw_response="",
-                    tokens_used=0,
-                    cost=0,
-                    error=f"Empty response from inference. stderr: {result.stderr}"
-                )
+                if response.status_code != 200:
+                    return VLMResponse(
+                        bboxes=[],
+                        raw_response="",
+                        tokens_used=0,
+                        cost=0,
+                        error=f"Server error: {response.status_code}"
+                    )
 
-            try:
-                output = json.loads(stdout)
-            except json.JSONDecodeError as e:
-                return VLMResponse(
-                    bboxes=[],
-                    raw_response="",
-                    tokens_used=0,
-                    cost=0,
-                    error=f"Invalid JSON from inference: {e}. stdout: {stdout[:500]}, stderr: {result.stderr[:500] if result.stderr else 'none'}"
-                )
+                output = response.json()
 
-            if "error" in output:
-                return VLMResponse(
-                    bboxes=[],
-                    raw_response="",
-                    tokens_used=0,
-                    cost=0,
-                    error=output["error"]
-                )
-
-            # Convert detections to BoundingBox objects
-            bboxes = [
-                BoundingBox(
-                    class_name=d["class_name"],
-                    x_center=d["x_center"],
-                    y_center=d["y_center"],
-                    width=d["width"],
-                    height=d["height"],
-                    confidence=d["confidence"]
-                )
-                for d in output.get("detections", [])
-            ]
-
-            return VLMResponse(
-                bboxes=bboxes,
-                raw_response=output.get("raw_response", ""),
-                tokens_used=output.get("tokens_used", 0),
-                cost=0.0
-            )
-
-        except subprocess.TimeoutExpired:
+        except httpx.TimeoutException:
             return VLMResponse(
                 bboxes=[],
                 raw_response="",
                 tokens_used=0,
                 cost=0,
-                error="Inference timed out (>5 min)"
+                error="Inference timeout"
             )
         except Exception as e:
             return VLMResponse(
@@ -812,8 +955,37 @@ class DeepSeekVL2Provider(VLMProvider):
                 raw_response="",
                 tokens_used=0,
                 cost=0,
-                error=str(e)
+                error=f"Server request failed: {e}"
             )
+
+        if "error" in output:
+            return VLMResponse(
+                bboxes=[],
+                raw_response="",
+                tokens_used=0,
+                cost=0,
+                error=output["error"]
+            )
+
+        # Convert detections to BoundingBox objects
+        bboxes = [
+            BoundingBox(
+                class_name=d["class_name"],
+                x_center=d["x_center"],
+                y_center=d["y_center"],
+                width=d["width"],
+                height=d["height"],
+                confidence=d["confidence"]
+            )
+            for d in output.get("detections", [])
+        ]
+
+        return VLMResponse(
+            bboxes=bboxes,
+            raw_response=output.get("raw_response", ""),
+            tokens_used=output.get("tokens_used", 0),
+            cost=0.0
+        )
 
     def get_cost_estimate(self, image_count: int) -> float:
         return 0.0  # Local inference is free

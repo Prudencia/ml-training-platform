@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """
-DeepSeek-VL2 inference script - run via subprocess from venv
-Input: JSON on stdin with image_path, classes, model
-Output: JSON on stdout with detections
+DeepSeek-VL2 BATCH inference script - processes multiple images with one model load
+Input: JSON on stdin with images list, classes, model
+Output: JSON on stdout with detections for all images
 
-Requires: pip install git+https://github.com/deepseek-ai/DeepSeek-VL2.git
+This avoids reloading the model for each image.
 """
 import sys
 import os
@@ -12,7 +12,7 @@ import json
 import re
 from pathlib import Path
 
-# Suppress all library output to stdout - redirect to stderr
+# Suppress all library output to stdout
 import io
 class StdoutRedirector:
     def __init__(self):
@@ -26,15 +26,15 @@ class StdoutRedirector:
     def __exit__(self, *args):
         sys.stdout = self._original_stdout
 
-# Also suppress warnings and logging
+# Suppress warnings and logging
 import warnings
 warnings.filterwarnings("ignore")
 os.environ["TRANSFORMERS_VERBOSITY"] = "error"
 os.environ["HF_HUB_DISABLE_PROGRESS_BARS"] = "1"
 
+
 def parse_detections(response_text: str, classes: list):
     """Parse VLM response text into detections"""
-    # Extract JSON from response
     json_match = re.search(r'```(?:json)?\s*(\[.*?\])\s*```', response_text, re.DOTALL)
     if json_match:
         json_str = json_match.group(1)
@@ -71,7 +71,6 @@ def parse_detections(response_text: str, classes: list):
             confidence = float(det.get("confidence", 0.5))
             raw_values = [float(b) for b in bbox]
 
-            # Handle both 0-1 and 0-100 ranges
             if any(v > 1.0 for v in raw_values):
                 x_min, y_min, x_max, y_max = [v / 100.0 for v in raw_values]
             else:
@@ -82,7 +81,6 @@ def parse_detections(response_text: str, classes: list):
             width = x_max - x_min
             height = y_max - y_min
 
-            # Clamp
             x_center = max(0, min(1, x_center))
             y_center = max(0, min(1, y_center))
             width = max(0, min(1, width))
@@ -103,9 +101,9 @@ def parse_detections(response_text: str, classes: list):
     return detections
 
 
-def run_inference(image_path: str, classes: list, model_name: str):
-    """Run DeepSeek-VL2 inference using official DeepSeek package"""
-    # Suppress stdout during imports (libraries print debug info)
+def run_batch_inference(image_paths: list, classes: list, model_name: str):
+    """Run DeepSeek-VL2 inference on multiple images with single model load"""
+    # Suppress stdout during imports
     with StdoutRedirector():
         try:
             import torch
@@ -115,23 +113,22 @@ def run_inference(image_path: str, classes: list, model_name: str):
         except ImportError as e:
             pass
 
-    # Check if imports succeeded
     try:
         import torch
         from PIL import Image
         from transformers import AutoModelForCausalLM
         from deepseek_vl2.models import DeepseekVLV2Processor, DeepseekVLV2ForCausalLM
     except ImportError as e:
-        return {"error": f"Missing dependencies. Install with: pip install git+https://github.com/deepseek-ai/DeepSeek-VL2.git\nError: {e}"}
+        return {"error": f"Missing dependencies: {e}"}
+
+    results = []
 
     try:
-        # Suppress all stdout during model loading and inference
+        # Load model ONCE
         with StdoutRedirector():
-            # Load processor and model
             vl_chat_processor = DeepseekVLV2Processor.from_pretrained(model_name)
             tokenizer = vl_chat_processor.tokenizer
 
-            # Load model with trust_remote_code
             vl_gpt = AutoModelForCausalLM.from_pretrained(
                 model_name,
                 trust_remote_code=True,
@@ -143,12 +140,8 @@ def run_inference(image_path: str, classes: list, model_name: str):
             else:
                 vl_gpt = vl_gpt.eval()
 
-            # Load image
-            image = Image.open(image_path).convert("RGB")
-
-            # Build detection prompt
-            class_list = ", ".join(classes)
-            detection_prompt = f"""Detect all objects of these classes in the image: {class_list}
+        class_list = ", ".join(classes)
+        detection_prompt = f"""Detect all objects of these classes in the image: {class_list}
 
 For each object found, provide its bounding box coordinates as percentages (0-100) of the image size.
 
@@ -157,51 +150,62 @@ Return a JSON array:
 
 If no objects found, return: []"""
 
-            # DeepSeek-VL2 conversation format
-            conversation = [
-                {
-                    "role": "<|User|>",
-                    "content": f"<image>\n{detection_prompt}",
-                    "images": [image],
-                },
-                {"role": "<|Assistant|>", "content": ""},
-            ]
+        # Process each image
+        for image_path in image_paths:
+            try:
+                with StdoutRedirector():
+                    image = Image.open(image_path).convert("RGB")
 
-            # Prepare inputs
-            pil_images = [image]
-            prepare_inputs = vl_chat_processor(
-                conversations=conversation,
-                images=pil_images,
-                force_batchify=True,
-                system_prompt=""
-            )
+                    conversation = [
+                        {
+                            "role": "<|User|>",
+                            "content": f"<image>\n{detection_prompt}",
+                            "images": [image],
+                        },
+                        {"role": "<|Assistant|>", "content": ""},
+                    ]
 
-            if torch.cuda.is_available():
-                prepare_inputs = prepare_inputs.to(vl_gpt.device)
+                    prepare_inputs = vl_chat_processor(
+                        conversations=conversation,
+                        images=[image],
+                        force_batchify=True,
+                        system_prompt=""
+                    )
 
-            # Generate
-            with torch.no_grad():
-                inputs_embeds = vl_gpt.prepare_inputs_embeds(**prepare_inputs)
-                outputs = vl_gpt.language.generate(
-                    inputs_embeds=inputs_embeds,
-                    attention_mask=prepare_inputs.attention_mask,
-                    pad_token_id=tokenizer.eos_token_id,
-                    bos_token_id=tokenizer.bos_token_id,
-                    eos_token_id=tokenizer.eos_token_id,
-                    max_new_tokens=512,
-                    do_sample=False,
-                    use_cache=True,
-                )
+                    if torch.cuda.is_available():
+                        prepare_inputs = prepare_inputs.to(vl_gpt.device)
 
-            generated_text = tokenizer.decode(outputs[0], skip_special_tokens=True)
+                    with torch.no_grad():
+                        inputs_embeds = vl_gpt.prepare_inputs_embeds(**prepare_inputs)
+                        outputs = vl_gpt.language.generate(
+                            inputs_embeds=inputs_embeds,
+                            attention_mask=prepare_inputs.attention_mask,
+                            pad_token_id=tokenizer.eos_token_id,
+                            bos_token_id=tokenizer.bos_token_id,
+                            eos_token_id=tokenizer.eos_token_id,
+                            max_new_tokens=512,
+                            do_sample=False,
+                            use_cache=True,
+                        )
 
-        detections = parse_detections(generated_text, classes)
+                    generated_text = tokenizer.decode(outputs[0], skip_special_tokens=True)
 
-        return {
-            "detections": detections,
-            "tokens_used": len(outputs[0]),
-            "raw_response": generated_text[:500]
-        }
+                detections = parse_detections(generated_text, classes)
+                results.append({
+                    "image_path": image_path,
+                    "detections": detections,
+                    "tokens_used": len(outputs[0]),
+                    "raw_response": generated_text[:500]
+                })
+
+            except Exception as e:
+                results.append({
+                    "image_path": image_path,
+                    "error": str(e),
+                    "detections": []
+                })
+
+        return {"results": results}
 
     except Exception as e:
         import traceback
@@ -209,14 +213,12 @@ If no objects found, return: []"""
 
 
 if __name__ == "__main__":
-    # Read input from stdin
     input_data = json.loads(sys.stdin.read())
 
-    result = run_inference(
-        image_path=input_data["image_path"],
+    result = run_batch_inference(
+        image_paths=input_data["image_paths"],
         classes=input_data["classes"],
         model_name=input_data.get("model", "deepseek-ai/deepseek-vl2-tiny")
     )
 
-    # Output result as JSON
     print(json.dumps(result))
