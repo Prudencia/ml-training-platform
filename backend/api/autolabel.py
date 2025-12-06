@@ -1244,13 +1244,14 @@ def _update_project_counts(project_id: int, db: Session):
 class VLMJobCreate(BaseModel):
     """Request model for creating a VLM auto-labeling job"""
     project_id: int
-    provider: str  # "anthropic", "openai", "ollama"
+    provider: str  # "anthropic", "openai", "ollama", "nvidia", "florence2"
     model: Optional[str] = None  # Specific model to use (e.g., "llava:7b" for Ollama)
     classes: List[str]  # Classes to detect
     confidence_threshold: float = 0.5
     batch_size: int = 10  # Smaller batches for API rate limits
     only_unannotated: bool = True
     custom_prompt: Optional[str] = None
+    device: str = "cuda"  # "cuda" or "cpu" - for local models (Florence-2)
 
 
 def _get_vlm_settings(db: Session) -> dict:
@@ -1369,23 +1370,6 @@ async def get_vlm_providers(db: Session = Depends(get_db)):
         "description": "Microsoft's vision model with native object detection. Downloads model on first use."
     })
 
-    # DeepSeek-VL2 (local)
-    from api.vlm_providers import DeepSeekVL2Provider
-    deepseek_available = DeepSeekVL2Provider.is_available()
-    deepseek_models = DeepSeekVL2Provider.list_models()
-    providers.append({
-        "name": "deepseek",
-        "display_name": "DeepSeek-VL2 (Local)",
-        "provider_type": "local",
-        "is_configured": True,  # No API key needed
-        "is_available": deepseek_available,
-        "models": [m["name"] for m in deepseek_models],
-        "models_detailed": deepseek_models,
-        "default_model": "deepseek-ai/deepseek-vl2-tiny",
-        "estimated_cost_per_image": 0.0,
-        "description": "DeepSeek's MoE vision model. Tiny version fits 8GB+ VRAM."
-    })
-
     return {"providers": providers}
 
 
@@ -1420,7 +1404,7 @@ async def estimate_vlm_cost(
         "image_count": image_count,
         "estimated_cost": vlm_provider.get_cost_estimate(image_count),
         "provider": provider,
-        "is_free": provider in ["ollama", "florence2", "deepseek"]
+        "is_free": provider in ["ollama", "florence2"]
     }
 
 
@@ -1497,8 +1481,8 @@ async def create_vlm_job(
     db.commit()
     db.refresh(job)
 
-    # Start background task
-    background_tasks.add_task(run_vlm_autolabel_job, job.id)
+    # Start background task with device setting
+    background_tasks.add_task(run_vlm_autolabel_job, job.id, job_data.device)
 
     return {
         "id": job.id,
@@ -1508,11 +1492,12 @@ async def create_vlm_job(
         "provider": job_data.provider,
         "model": model_display or job_data.provider,
         "classes": job_data.classes,
+        "device": job_data.device,
         "message": "VLM auto-labeling job started"
     }
 
 
-def run_vlm_autolabel_job(job_id: int):
+def run_vlm_autolabel_job(job_id: int, device: str = "cuda"):
     """Run VLM inference on images for auto-labeling (background task)"""
     import asyncio
     from database import SessionLocal
@@ -1531,10 +1516,11 @@ def run_vlm_autolabel_job(job_id: int):
 
         # Get provider with specific model from job
         settings = _get_vlm_settings(db)
+        settings["device"] = device  # Pass device setting to provider
         provider = get_vlm_provider(job.vlm_provider, settings, model_override=job.vlm_model)
         classes = job.vlm_classes or []
 
-        print(f"VLM Job {job_id}: Using provider={job.vlm_provider}, model={job.vlm_model or 'default'}, classes={classes}")
+        print(f"VLM Job {job_id}: Using provider={job.vlm_provider}, model={job.vlm_model or 'default'}, device={device}, classes={classes}")
 
         # Get images
         if job.only_unannotated:

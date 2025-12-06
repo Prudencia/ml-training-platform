@@ -5,11 +5,41 @@ Input: JSON on stdin with image_path, classes, model
 Output: JSON on stdout with detections
 """
 import sys
+import os
 import json
 from pathlib import Path
 
-def run_inference(image_path: str, classes: list, model_name: str):
+# Suppress warnings
+import warnings
+warnings.filterwarnings("ignore")
+os.environ["TRANSFORMERS_VERBOSITY"] = "error"
+
+# Patch to avoid flash_attn requirement
+def patch_flash_attn():
+    """Create a mock flash_attn module to avoid import errors"""
+    import types
+    import importlib.util
+
+    # Create a proper mock module with __spec__
+    mock_flash_attn = types.ModuleType('flash_attn')
+    mock_flash_attn.__spec__ = importlib.util.spec_from_loader('flash_attn', loader=None)
+    mock_flash_attn.__version__ = "0.0.0"  # Fake version to fail version checks
+    mock_flash_attn.flash_attn_func = None
+    mock_flash_attn.flash_attn_varlen_func = None
+
+    mock_interface = types.ModuleType('flash_attn.flash_attn_interface')
+    mock_interface.__spec__ = importlib.util.spec_from_loader('flash_attn.flash_attn_interface', loader=None)
+    mock_interface.flash_attn_func = None
+    mock_interface.flash_attn_varlen_func = None
+
+    sys.modules['flash_attn'] = mock_flash_attn
+    sys.modules['flash_attn.flash_attn_interface'] = mock_interface
+
+def run_inference(image_path: str, classes: list, model_name: str, device: str = "cuda"):
     """Run Florence-2 inference"""
+    # Patch flash_attn before importing transformers
+    patch_flash_attn()
+
     try:
         from transformers import AutoProcessor, AutoModelForCausalLM
         from PIL import Image
@@ -18,16 +48,23 @@ def run_inference(image_path: str, classes: list, model_name: str):
         return {"error": f"Missing dependencies: {e}"}
 
     try:
-        # Load model
-        device = "cuda" if torch.cuda.is_available() else "cpu"
-        dtype = torch.float16 if torch.cuda.is_available() else torch.float32
+        # Load model - use float32 to avoid dtype mismatch issues
+        # Use requested device, fallback to CPU if CUDA not available
+        if device == "cuda" and not torch.cuda.is_available():
+            device = "cpu"
+            print(f"CUDA not available, falling back to CPU", file=sys.stderr)
 
-        processor = AutoProcessor.from_pretrained(model_name, trust_remote_code=True)
+        # Use older revision that works without flash_attn, and force eager attention
+        processor = AutoProcessor.from_pretrained(
+            model_name,
+            trust_remote_code=True
+        )
         model = AutoModelForCausalLM.from_pretrained(
             model_name,
-            torch_dtype=dtype,
-            trust_remote_code=True
-        ).to(device)
+            torch_dtype=torch.float32,  # Use float32 to avoid dtype mismatch
+            trust_remote_code=True,
+            attn_implementation="eager"  # Force eager attention instead of flash
+        ).to(device).eval()
 
         # Load image
         image = Image.open(image_path).convert("RGB")
@@ -128,7 +165,8 @@ if __name__ == "__main__":
     result = run_inference(
         image_path=input_data["image_path"],
         classes=input_data["classes"],
-        model_name=input_data.get("model", "microsoft/Florence-2-base")
+        model_name=input_data.get("model", "microsoft/Florence-2-base"),
+        device=input_data.get("device", "cuda")
     )
 
     # Output result as JSON

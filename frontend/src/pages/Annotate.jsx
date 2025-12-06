@@ -62,12 +62,14 @@ function Annotate() {
   const [selectedOllamaModel, setSelectedOllamaModel] = useState('')
   const [vlmClasses, setVlmClasses] = useState([])
   const [vlmCostEstimate, setVlmCostEstimate] = useState(null)
+  const [vlmDevice, setVlmDevice] = useState('cuda') // 'cuda' or 'cpu'
 
   // Class mapping state
   const [projectClasses, setProjectClasses] = useState([])
   const [modelClasses, setModelClasses] = useState([])
   const [classMappings, setClassMappings] = useState({})
   const [showClassMapping, setShowClassMapping] = useState(false)
+  const [previewPrediction, setPreviewPrediction] = useState(null) // For image preview with bbox
   const pollingRef = useRef(null)
 
   useEffect(() => {
@@ -75,9 +77,9 @@ function Annotate() {
     loadDatasets()
   }, [])
 
-  // Polling for job status when on progress tab with a running job
+  // Polling for job status when on progress tab with a running or pending job
   useEffect(() => {
-    if (autoLabelTab === 'progress' && currentJob && currentJob.status === 'running') {
+    if (autoLabelTab === 'progress' && currentJob && (currentJob.status === 'running' || currentJob.status === 'pending')) {
       const pollJob = async () => {
         try {
           const res = await autolabelAPI.getJob(currentJob.id)
@@ -95,6 +97,8 @@ function Annotate() {
         }
       }
 
+      // Poll immediately on mount, then every 2 seconds
+      pollJob()
       pollingRef.current = setInterval(pollJob, 2000)
 
       return () => {
@@ -451,7 +455,8 @@ function Annotate() {
         classes: vlmClasses,
         confidence_threshold: confidence,
         batch_size: selectedVLMProvider === 'ollama' ? 50 : 10, // Smaller batches for cloud APIs
-        only_unannotated: onlyUnannotated
+        only_unannotated: onlyUnannotated,
+        device: vlmDevice  // Pass device setting for local models (florence2)
       })
 
       setCurrentJob(res.data)
@@ -571,6 +576,35 @@ function Annotate() {
       alert('Failed to reject all: ' + (error.response?.data?.detail || error.message))
     } finally {
       setAutoLabelLoading(false)
+    }
+  }
+
+  const handleDeleteJob = async (jobId, e) => {
+    e.stopPropagation() // Prevent clicking the job row
+    if (!confirm('Delete this job and all its predictions? This cannot be undone.')) return
+    try {
+      await autolabelAPI.deleteJob(jobId)
+      setAutoLabelJobs(autoLabelJobs.filter(j => j.id !== jobId))
+      if (currentJob?.id === jobId) {
+        setCurrentJob(null)
+        setAutoLabelTab('setup')
+      }
+    } catch (error) {
+      console.error('Failed to delete job:', error)
+      alert('Failed to delete job: ' + (error.response?.data?.detail || error.message))
+    }
+  }
+
+  const handleDeleteAllJobs = async () => {
+    if (!confirm(`Delete all ${autoLabelJobs.length} jobs and their predictions? This cannot be undone.`)) return
+    try {
+      await Promise.all(autoLabelJobs.map(job => autolabelAPI.deleteJob(job.id)))
+      setAutoLabelJobs([])
+      setCurrentJob(null)
+      setAutoLabelTab('setup')
+    } catch (error) {
+      console.error('Failed to delete all jobs:', error)
+      alert('Failed to delete some jobs: ' + (error.response?.data?.detail || error.message))
     }
   }
 
@@ -1171,15 +1205,21 @@ function Annotate() {
                     Progress
                   </button>
                   <button
-                    onClick={() => setAutoLabelTab('review')}
-                    disabled={!currentJob || currentJob.status !== 'completed'}
+                    onClick={() => {
+                      setAutoLabelTab('review')
+                      if (currentJob) {
+                        loadPredictions(currentJob.id)
+                        loadModelClasses(currentJob.id)
+                      }
+                    }}
+                    disabled={!currentJob || (currentJob.status !== 'completed' && currentJob.status !== 'paused' && currentJob.processed_images === 0)}
                     className={`flex-1 py-2 px-4 text-sm font-medium border-b-2 transition-colors ${
                       autoLabelTab === 'review'
                         ? 'border-purple-600 text-purple-600'
                         : 'border-transparent text-gray-500 hover:text-gray-700'
                     } disabled:opacity-50`}
                   >
-                    Review
+                    Review {currentJob?.processed_images > 0 && currentJob?.status !== 'completed' ? `(${currentJob.processed_images})` : ''}
                   </button>
                 </div>
 
@@ -1385,6 +1425,42 @@ function Annotate() {
                             )}
                           </div>
                         )}
+
+                        {/* Device Selection for Local VLM (Florence-2) */}
+                        {selectedVLMProvider === 'florence2' && (
+                          <div>
+                            <label className="block text-sm font-medium text-gray-700 mb-2">
+                              Inference Device
+                            </label>
+                            <div className="flex gap-2">
+                              <button
+                                onClick={() => setVlmDevice('cuda')}
+                                className={`flex-1 px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
+                                  vlmDevice === 'cuda'
+                                    ? 'bg-green-600 text-white'
+                                    : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                                }`}
+                              >
+                                🚀 GPU (CUDA)
+                              </button>
+                              <button
+                                onClick={() => setVlmDevice('cpu')}
+                                className={`flex-1 px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
+                                  vlmDevice === 'cpu'
+                                    ? 'bg-blue-600 text-white'
+                                    : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                                }`}
+                              >
+                                💻 CPU
+                              </button>
+                            </div>
+                            <p className="text-xs text-gray-500 mt-1">
+                              {vlmDevice === 'cuda'
+                                ? 'GPU is faster but requires CUDA and sufficient VRAM'
+                                : 'CPU is slower but works on any system'}
+                            </p>
+                          </div>
+                        )}
                       </>
                     )}
 
@@ -1438,7 +1514,17 @@ function Annotate() {
                     {/* Previous Jobs */}
                     {autoLabelJobs.length > 0 && (
                       <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-2">Previous Jobs</label>
+                        <div className="flex items-center justify-between mb-2">
+                          <label className="text-sm font-medium text-gray-700">Previous Jobs</label>
+                          <button
+                            onClick={handleDeleteAllJobs}
+                            className="px-2 py-1 text-xs text-red-600 hover:bg-red-50 rounded flex items-center gap-1"
+                            title="Delete all jobs"
+                          >
+                            <Trash2 size={12} />
+                            Clear All
+                          </button>
+                        </div>
                         <div className="border rounded-lg max-h-40 overflow-y-auto">
                           {autoLabelJobs.map((job) => (
                             <div
@@ -1450,7 +1536,7 @@ function Annotate() {
                                   setAutoLabelTab('review')
                                   loadPredictions(job.id)
                                   loadModelClasses(job.id)
-                                } else if (job.status === 'running') {
+                                } else if (job.status === 'running' || job.status === 'pending') {
                                   setAutoLabelTab('progress')
                                   // Polling handled by useEffect
                                 } else if (job.status === 'paused') {
@@ -1458,23 +1544,32 @@ function Annotate() {
                                 }
                               }}
                             >
-                              <div>
-                                <p className="text-sm font-medium">
+                              <div className="flex-1 min-w-0">
+                                <p className="text-sm font-medium truncate">
                                   {job.model_type === 'vlm' ? `VLM: ${job.vlm_provider}` : job.model_name || 'Unknown model'}
                                 </p>
                                 <p className="text-xs text-gray-500">
                                   {new Date(job.created_at).toLocaleDateString()} - {job.predictions_count || 0} predictions
                                 </p>
                               </div>
-                              <span className={`px-2 py-1 text-xs rounded-full ${
-                                job.status === 'completed' ? 'bg-green-100 text-green-800' :
-                                job.status === 'running' ? 'bg-blue-100 text-blue-800' :
-                                job.status === 'paused' ? 'bg-yellow-100 text-yellow-800' :
-                                job.status === 'failed' ? 'bg-red-100 text-red-800' :
-                                'bg-gray-100 text-gray-800'
-                              }`}>
-                                {job.status}
-                              </span>
+                              <div className="flex items-center gap-2">
+                                <span className={`px-2 py-1 text-xs rounded-full ${
+                                  job.status === 'completed' ? 'bg-green-100 text-green-800' :
+                                  job.status === 'running' ? 'bg-blue-100 text-blue-800' :
+                                  job.status === 'paused' ? 'bg-yellow-100 text-yellow-800' :
+                                  job.status === 'failed' ? 'bg-red-100 text-red-800' :
+                                  'bg-gray-100 text-gray-800'
+                                }`}>
+                                  {job.status}
+                                </span>
+                                <button
+                                  onClick={(e) => handleDeleteJob(job.id, e)}
+                                  className="p-1 text-red-500 hover:bg-red-50 rounded"
+                                  title="Delete job"
+                                >
+                                  <Trash2 size={14} />
+                                </button>
+                              </div>
                             </div>
                           ))}
                         </div>
@@ -1694,16 +1789,15 @@ function Annotate() {
                         {predictions.map((pred) => (
                           <div
                             key={pred.id}
-                            className="flex items-center gap-4 p-3 border-b last:border-b-0 hover:bg-gray-50"
+                            className="flex items-center gap-4 p-3 border-b last:border-b-0 hover:bg-gray-50 cursor-pointer"
+                            onClick={() => setPreviewPrediction(pred)}
                           >
                             <div className="w-16 h-16 bg-gray-100 rounded overflow-hidden flex-shrink-0">
-                              {pred.image_thumbnail && (
-                                <img
-                                  src={annotationsAPI.getThumbnailUrl(selectedProject.id, pred.image_id)}
-                                  alt=""
-                                  className="w-full h-full object-cover"
-                                />
-                              )}
+                              <img
+                                src={`${import.meta.env.VITE_API_URL || ''}/api/annotations/projects/${selectedProject.id}/images/${pred.image_id}/file`}
+                                alt=""
+                                className="w-full h-full object-cover"
+                              />
                             </div>
                             <div className="flex-1 min-w-0">
                               <p className="font-medium text-sm truncate">{pred.class_name}</p>
@@ -1713,14 +1807,14 @@ function Annotate() {
                             </div>
                             <div className="flex gap-2">
                               <button
-                                onClick={() => handleRejectPrediction(pred.id)}
+                                onClick={(e) => { e.stopPropagation(); handleRejectPrediction(pred.id); }}
                                 className="p-2 text-red-600 hover:bg-red-50 rounded"
                                 title="Reject"
                               >
                                 <XCircle size={20} />
                               </button>
                               <button
-                                onClick={() => handleApprovePrediction(pred.id)}
+                                onClick={(e) => { e.stopPropagation(); handleApprovePrediction(pred.id); }}
                                 className="p-2 text-green-600 hover:bg-green-50 rounded"
                                 title="Approve"
                               >
@@ -1729,6 +1823,81 @@ function Annotate() {
                             </div>
                           </div>
                         ))}
+                      </div>
+                    )}
+
+                    {/* Prediction Preview Modal */}
+                    {previewPrediction && (
+                      <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50" onClick={() => setPreviewPrediction(null)}>
+                        <div className="bg-white rounded-lg max-w-4xl max-h-[90vh] overflow-auto m-4" onClick={(e) => e.stopPropagation()}>
+                          <div className="p-4 border-b flex items-center justify-between">
+                            <div>
+                              <h3 className="font-semibold">{previewPrediction.class_name}</h3>
+                              <p className="text-sm text-gray-500">Confidence: {(previewPrediction.confidence * 100).toFixed(1)}%</p>
+                            </div>
+                            <div className="flex gap-2">
+                              <button
+                                onClick={() => { handleRejectPrediction(previewPrediction.id); setPreviewPrediction(null); }}
+                                className="px-4 py-2 bg-red-100 text-red-700 rounded-lg hover:bg-red-200"
+                              >
+                                Reject
+                              </button>
+                              <button
+                                onClick={() => { handleApprovePrediction(previewPrediction.id); setPreviewPrediction(null); }}
+                                className="px-4 py-2 bg-green-100 text-green-700 rounded-lg hover:bg-green-200"
+                              >
+                                Approve
+                              </button>
+                              <button
+                                onClick={() => setPreviewPrediction(null)}
+                                className="px-4 py-2 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200"
+                              >
+                                Close
+                              </button>
+                            </div>
+                          </div>
+                          <div className="p-4 relative">
+                            <div className="relative inline-block">
+                              <img
+                                src={`${import.meta.env.VITE_API_URL || ''}/api/annotations/projects/${selectedProject.id}/images/${previewPrediction.image_id}/file`}
+                                alt="Preview"
+                                className="max-w-full max-h-[70vh]"
+                                onLoad={(e) => {
+                                  // Draw bounding box overlay after image loads
+                                  const img = e.target;
+                                  const container = img.parentElement;
+                                  // Remove existing overlay if any
+                                  const existingOverlay = container.querySelector('.bbox-overlay');
+                                  if (existingOverlay) existingOverlay.remove();
+
+                                  // Create SVG overlay for bbox
+                                  const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+                                  svg.classList.add('bbox-overlay');
+                                  svg.style.cssText = 'position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none;';
+
+                                  const pred = previewPrediction;
+                                  const x = (pred.x_center - pred.width/2) * 100;
+                                  const y = (pred.y_center - pred.height/2) * 100;
+                                  const w = pred.width * 100;
+                                  const h = pred.height * 100;
+
+                                  svg.innerHTML = `
+                                    <rect x="${x}%" y="${y}%" width="${w}%" height="${h}%"
+                                          fill="none" stroke="#22c55e" stroke-width="3"/>
+                                    <text x="${x}%" y="${Math.max(y-1, 3)}%" fill="#22c55e" font-size="14" font-weight="bold">
+                                      ${pred.class_name} (${(pred.confidence*100).toFixed(0)}%)
+                                    </text>
+                                  `;
+                                  container.appendChild(svg);
+                                }}
+                              />
+                            </div>
+                            <div className="mt-2 text-xs text-gray-500">
+                              BBox: x={previewPrediction.x_center.toFixed(3)}, y={previewPrediction.y_center.toFixed(3)},
+                              w={previewPrediction.width.toFixed(3)}, h={previewPrediction.height.toFixed(3)}
+                            </div>
+                          </div>
+                        </div>
                       </div>
                     )}
 

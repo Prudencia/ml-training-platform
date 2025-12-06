@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react'
 import {
   FileText, RefreshCw, Search, Download, Copy, Check,
   Terminal, AlertCircle, Server, Box, Cpu, Filter,
-  ChevronDown, Loader2, XCircle
+  ChevronDown, Loader2, XCircle, Trash2
 } from 'lucide-react'
 
 const API_BASE = import.meta.env.VITE_API_URL || ''
@@ -20,6 +20,7 @@ function SystemLogs() {
   const [filterText, setFilterText] = useState('')
   const [copied, setCopied] = useState(false)
   const [showSourceDropdown, setShowSourceDropdown] = useState(false)
+  const [showClearDropdown, setShowClearDropdown] = useState(false)
 
   const logContainerRef = useRef(null)
   const intervalRef = useRef(null)
@@ -151,6 +152,27 @@ function SystemLogs() {
     URL.revokeObjectURL(url)
   }
 
+  const clearLogs = async (source) => {
+    if (!confirm(`Clear ${source} logs? This cannot be undone.`)) return
+
+    try {
+      const response = await fetch(`${API_BASE}/api/logs/clear/${source}`, {
+        method: 'DELETE'
+      })
+      if (response.ok) {
+        const data = await response.json()
+        alert(data.message)
+        fetchLogs(activeSource)
+        fetchSources()
+      } else {
+        const err = await response.json()
+        alert(`Failed: ${err.detail}`)
+      }
+    } catch (err) {
+      alert(`Error: ${err.message}`)
+    }
+  }
+
   const getSourceIcon = (sourceId) => {
     const predefined = predefinedSources.find(s => s.id === sourceId)
     if (predefined) return predefined.icon
@@ -232,6 +254,45 @@ function SystemLogs() {
             <Download size={16} />
             Download
           </button>
+          <div className="relative">
+            <button
+              onClick={() => setShowClearDropdown(!showClearDropdown)}
+              className="px-3 py-2 text-sm bg-red-50 hover:bg-red-100 text-red-600 rounded-lg flex items-center gap-2"
+              title="Clear logs"
+            >
+              <Trash2 size={16} />
+              Clear
+              <ChevronDown size={14} />
+            </button>
+            {showClearDropdown && (
+              <>
+                <div
+                  className="fixed inset-0 z-10"
+                  onClick={() => setShowClearDropdown(false)}
+                />
+                <div className="absolute right-0 top-full mt-1 bg-white border rounded-lg shadow-lg z-20 min-w-[160px]">
+                  <button
+                    onClick={() => { clearLogs('venv'); setShowClearDropdown(false); }}
+                    className="w-full px-4 py-2 text-left text-sm hover:bg-gray-100 flex items-center gap-2"
+                  >
+                    <Box size={14} /> Venv Logs
+                  </button>
+                  <button
+                    onClick={() => { clearLogs('training'); setShowClearDropdown(false); }}
+                    className="w-full px-4 py-2 text-left text-sm hover:bg-gray-100 flex items-center gap-2"
+                  >
+                    <Terminal size={14} /> Training Logs
+                  </button>
+                  <button
+                    onClick={() => { clearLogs('all'); setShowClearDropdown(false); }}
+                    className="w-full px-4 py-2 text-left text-sm hover:bg-red-50 text-red-600 border-t flex items-center gap-2"
+                  >
+                    <Trash2 size={14} /> All Log Files
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
         </div>
       </div>
 

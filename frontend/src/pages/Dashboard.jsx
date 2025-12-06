@@ -108,44 +108,31 @@ function Dashboard() {
 
   return (
     <div className="space-y-6">
-      {/* Stats Cards - Row 1: Core Stats */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-        <div className="bg-white p-5 rounded-lg shadow">
-          <h3 className="text-sm font-semibold text-gray-600">Active Training Jobs</h3>
-          <p className="text-3xl font-bold text-blue-600 mt-1">{stats.activeJobs}</p>
+      {/* Stats Cards - All in one responsive grid */}
+      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
+        <div className="bg-white p-4 rounded-lg shadow">
+          <h3 className="text-xs font-semibold text-gray-600">Active Training Jobs</h3>
+          <p className="text-2xl font-bold text-blue-600 mt-1">{stats.activeJobs}</p>
         </div>
-        <div className="bg-white p-5 rounded-lg shadow">
-          <h3 className="text-sm font-semibold text-gray-600">Total Datasets</h3>
-          <p className="text-3xl font-bold text-green-600 mt-1">{stats.totalDatasets}</p>
+        <div className="bg-white p-4 rounded-lg shadow">
+          <h3 className="text-xs font-semibold text-gray-600">Total Datasets</h3>
+          <p className="text-2xl font-bold text-green-600 mt-1">{stats.totalDatasets}</p>
         </div>
-        <div className="bg-white p-5 rounded-lg shadow">
-          <h3 className="text-sm font-semibold text-gray-600">Model Exports</h3>
-          <p className="text-3xl font-bold text-indigo-600 mt-1">{stats.totalExports}</p>
+        <div className="bg-white p-4 rounded-lg shadow">
+          <h3 className="text-xs font-semibold text-gray-600">Model Exports</h3>
+          <p className="text-2xl font-bold text-indigo-600 mt-1">{stats.totalExports}</p>
         </div>
-        <div className="bg-white p-5 rounded-lg shadow">
-          <h3 className="text-sm font-semibold text-gray-600">Virtual Environments</h3>
-          <p className="text-3xl font-bold text-purple-600 mt-1">{stats.totalVenvs}</p>
+        <div className="bg-white p-4 rounded-lg shadow">
+          <h3 className="text-xs font-semibold text-gray-600">Virtual Environments</h3>
+          <p className="text-2xl font-bold text-purple-600 mt-1">{stats.totalVenvs}</p>
         </div>
-      </div>
-
-      {/* Stats Cards - Row 2: Annotation & Auto-Labeling */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-        <div className="bg-white p-5 rounded-lg shadow">
-          <h3 className="text-sm font-semibold text-gray-600">Annotation Projects</h3>
-          <p className="text-3xl font-bold text-teal-600 mt-1">{stats.annotationProjects}</p>
+        <div className="bg-white p-4 rounded-lg shadow">
+          <h3 className="text-xs font-semibold text-gray-600">Annotation Projects</h3>
+          <p className="text-2xl font-bold text-teal-600 mt-1">{stats.annotationProjects}</p>
         </div>
-{stats.totalImages > 0 && (
-          <div className="bg-white p-5 rounded-lg shadow">
-            <h3 className="text-sm font-semibold text-gray-600">Annotated Images</h3>
-            <div className="flex items-baseline gap-2 mt-1">
-              <p className="text-3xl font-bold text-cyan-600">{stats.annotatedImages}</p>
-              <span className="text-sm text-gray-500">/ {stats.totalImages} total</span>
-            </div>
-          </div>
-        )}
-        <div className="bg-white p-5 rounded-lg shadow">
-          <h3 className="text-sm font-semibold text-gray-600">ACAP Builds</h3>
-          <p className="text-3xl font-bold text-rose-600 mt-1">{stats.acapBuilds}</p>
+        <div className="bg-white p-4 rounded-lg shadow">
+          <h3 className="text-xs font-semibold text-gray-600">ACAP Builds</h3>
+          <p className="text-2xl font-bold text-rose-600 mt-1">{stats.acapBuilds}</p>
         </div>
       </div>
 

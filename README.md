@@ -26,6 +26,10 @@ A comprehensive web-based platform for managing machine learning training workfl
   - LLaVA (7B, 13B, 34B), LLaMA 3.2 Vision, Moondream, MiniCPM-V, and more
   - One-click model installation from VLM page
   - Custom model support - pull any Ollama vision model
+- **Florence-2 (Local)**: Microsoft's vision model with native object detection
+  - Runs locally via dedicated venv - no API keys needed
+  - Multiple model sizes (Base, Large, Fine-tuned variants)
+  - GPU/CPU device selection for flexible inference
 - **Cloud Providers**: Use cloud APIs for higher accuracy
   - **NVIDIA NIM**: 1000 free credits for new users (Phi-3.5 Vision, VILA, LLaMA Vision)
   - **Anthropic Claude**: Claude Sonnet for vision tasks
@@ -56,6 +60,9 @@ A comprehensive web-based platform for managing machine learning training workfl
 
 ### Monitoring & Tools
 - **System Dashboard**: Real-time CPU, GPU, memory, and disk usage monitoring
+- **System Logs**: View backend, frontend, training, and VLM logs with filtering
+  - Clear logs by source (backend, frontend, training, VLM)
+  - Real-time log tailing with auto-refresh
 - **Web Terminal**: Interactive browser-based terminal with full PTY support
 - **Support Page**: Donation and contribution links
 
@@ -88,12 +95,16 @@ ml-training-platform/
 │   ├── Dockerfile              # Backend container (includes pyenv + Python 3.9)
 │   ├── presets/                # Venv preset configurations
 │   │   ├── axis_yolov5_requirements.txt  # TensorFlow 2.11, Python 3.9
-│   │   └── detectx_requirements.txt      # TensorFlow 2.20, Python 3.11+
+│   │   ├── detectx_requirements.txt      # TensorFlow 2.20, Python 3.11+
+│   │   └── florence2_requirements.txt    # Florence-2 VLM dependencies
 │   └── api/
 │       ├── annotations.py      # Annotation projects, images, labels
 │       ├── autolabel.py        # Auto-labeling with pretrained models
 │       ├── vlm_management.py   # VLM provider management (Ollama, cloud APIs)
 │       ├── vlm_providers.py    # VLM provider implementations
+│       ├── vlm_inference/      # Local VLM inference scripts
+│       │   └── florence2_infer.py  # Florence-2 subprocess inference
+│       ├── system_logs.py      # System log viewing and management
 │       ├── datasets.py         # Dataset upload, browse, preview
 │       ├── training.py         # Training job control
 │       ├── venv.py             # Virtual environment management + presets
@@ -119,6 +130,7 @@ ml-training-platform/
 │   │       ├── Queue.jsx           # Training queue
 │   │       ├── Exports.jsx         # Model exports
 │   │       ├── VLM.jsx             # VLM management page
+│   │       ├── SystemLogs.jsx      # System log viewer
 │   │       ├── AxisYOLOv5.jsx      # Axis workflow
 │   │       ├── DetectXBuild.jsx    # ACAP builder
 │   │       ├── Terminal.jsx        # Web terminal
@@ -293,6 +305,7 @@ The platform requires two specialized virtual environments for the Axis workflow
 | `/api/system/` | System monitoring |
 | `/api/terminal/` | Web terminal |
 | `/api/settings/` | User authentication, settings |
+| `/api/logs/` | System log viewing and clearing |
 
 ## System Requirements
 

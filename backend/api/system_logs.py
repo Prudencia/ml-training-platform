@@ -163,7 +163,7 @@ async def get_vlm_logs(
         all_logs = result.stdout + result.stderr
         lines_list = all_logs.split('\n')
 
-        vlm_keywords = ['vlm', 'auto-label', 'autolabel', 'florence', 'deepseek',
+        vlm_keywords = ['vlm', 'auto-label', 'autolabel', 'florence',
                        'inference', 'detection', 'bbox', 'provider']
         filtered = []
         for line in lines_list:
@@ -255,6 +255,56 @@ async def get_error_logs(
             "lines": len(filtered),
             "content": '\n'.join(filtered)
         }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.delete("/clear/{source}")
+async def clear_logs(source: str):
+    """Clear logs for a specific source"""
+    try:
+        if source == "docker":
+            # Truncate docker logs by restarting the container's logging
+            # Note: This clears the docker log file but requires container access
+            subprocess.run(
+                ["docker", "exec", "trainplattform-backend-1", "sh", "-c", "echo '' > /proc/1/fd/1"],
+                capture_output=True,
+                timeout=5
+            )
+            return {"message": "Docker logs cleared (will start fresh from now)"}
+
+        elif source == "venv":
+            # Clear all venv setup logs
+            count = 0
+            for log in LOG_PATH.glob("venv_setup_*.log"):
+                log.unlink()
+                count += 1
+            return {"message": f"Cleared {count} venv setup logs"}
+
+        elif source == "training":
+            # Clear all training logs
+            count = 0
+            for log in LOG_PATH.glob("training_*.log"):
+                log.unlink()
+                count += 1
+            return {"message": f"Cleared {count} training logs"}
+
+        elif source == "all":
+            # Clear all log files
+            count = 0
+            for log in LOG_PATH.glob("*.log"):
+                log.unlink()
+                count += 1
+            return {"message": f"Cleared {count} log files"}
+
+        else:
+            # Try to clear specific file
+            log_path = LOG_PATH / source
+            if log_path.exists() and log_path.suffix == ".log":
+                log_path.unlink()
+                return {"message": f"Cleared {source}"}
+            raise HTTPException(status_code=400, detail=f"Unknown source: {source}")
+
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 

@@ -314,14 +314,6 @@ PRESET_VENVS = {
         "apply_axis_patch": False,
         "custom_requirements": "presets/florence2_requirements.txt",
         "category": "vlm"
-    },
-    "deepseek_vl2": {
-        "name": "deepseek_vl2",
-        "description": "DeepSeek-VL2 local VLM (Mixture-of-Experts vision-language model)",
-        "github_repo": None,
-        "apply_axis_patch": False,
-        "custom_requirements": "presets/deepseek_vl2_requirements.txt",
-        "category": "vlm"
     }
 }
 
